@@ -2,13 +2,28 @@ package proxy
 
 import (
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
+	"time"
 )
+
+var concurrentTries int
+var waitGatewayResponseFor int
+
+func init() {
+	concurrentTries = 3
+	waitGatewayResponseFor = 6 // seconds
+}
 
 type Server struct {
 	Logger *log.Logger
+}
+
+type FirstValidResponse struct {
+	Err      error
+	Response *http.Response
+	TimedOut bool
 }
 
 func (s *Server) handleFailure(w http.ResponseWriter, url string, err error) {
@@ -17,6 +32,11 @@ func (s *Server) handleFailure(w http.ResponseWriter, url string, err error) {
 
 	w.WriteHeader(http.StatusBadGateway)
 	w.Write([]byte("\r\nBad gateway"))
+}
+
+func (s *Server) handleGatewayFailure(url string, err error) {
+	s.Logger.Printf("\nRequest to %s failed.", url)
+	s.Logger.Println(err)
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -34,27 +54,70 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.Logger.Printf("Path: %v\n", r.URL.Path)
 	s.Logger.Printf("Body: %v\n", r.Body)
 
-	client := NewClient("https://proxy.crawlera.com:8010", s.Logger)
-	url := r.URL.String()
+	firstValidResponse := s.processRequest(r)
 
-	response, err := client.Get(url)
-	if err != nil {
-		s.handleFailure(w, url, err)
+	if firstValidResponse.Err != nil {
+		s.Logger.Println(firstValidResponse.Err)
 		return
 	}
 
-	defer response.Body.Close()
-
-	if response.StatusCode == http.StatusOK {
-		body, err := ioutil.ReadAll(response.Body)
-		if err != nil {
-			s.handleFailure(w, url, err)
-			return
-		}
+	if firstValidResponse.Response.StatusCode == http.StatusOK {
+		s.Logger.Println("Sending success response")
 		w.WriteHeader(http.StatusOK)
-		w.Write(body)
+		bytesCopied, _ := io.Copy(w, firstValidResponse.Response.Body)
+		if err := firstValidResponse.Response.Body.Close(); err != nil {
+			s.Logger.Printf("Can't close response body %v", err)
+		}
+		s.Logger.Printf("Copied %v bytes to client", bytesCopied)
 	} else {
-		s.handleFailure(w, url, fmt.Errorf("Error status %d", response.StatusCode))
+		w.WriteHeader(http.StatusBadGateway)
+		w.Write([]byte("\r\nBad gateway"))
+	}
+}
+
+func (s *Server) processRequest(r *http.Request) *FirstValidResponse {
+	defer func() {
+		s.Logger.Println("\nProcess request method exiting...")
+	}()
+
+	client := NewClient("https://proxy.crawlera.com:8010", s.Logger)
+	url := r.URL.String()
+	responseCh := make(chan *http.Response, concurrentTries)
+	signal := time.Tick(time.Duration(waitGatewayResponseFor) * time.Second)
+
+	for i := 0; i < concurrentTries; i++ {
+		go func(id int) {
+			defer s.Logger.Printf("\nGoroutine %d exiting...", id)
+			response, err := client.Get(url)
+			if err != nil {
+				s.handleGatewayFailure(url, err)
+				return
+			}
+
+			if response.StatusCode == http.StatusOK {
+				responseCh <- response
+			} else {
+				s.handleGatewayFailure(url, fmt.Errorf("Error status %d", response.StatusCode))
+			}
+		}(i)
+	}
+
+	for {
+		select {
+		case firstResponse := <-responseCh:
+			s.Logger.Printf("\nReceived success response from %s", url)
+			return &FirstValidResponse{
+				Response: firstResponse,
+				Err:      nil,
+				TimedOut: false,
+			}
+		case <-signal:
+			return &FirstValidResponse{
+				Response: nil,
+				Err:      fmt.Errorf("Timeout after waiting for %d seconds", waitGatewayResponseFor),
+				TimedOut: true,
+			}
+		}
 	}
 }
 
