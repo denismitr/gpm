@@ -91,10 +91,11 @@ func (s *Server) processRequest(r *http.Request) *FirstValidResponse {
 		s.Logger.Println("\nProcess request method exiting...")
 	}()
 
-	client := NewClient("https://proxy.crawlera.com:8010", s.Logger)
+	timeout := time.Duration(waitGatewayResponseFor) * time.Second
+	client := NewClient("https://proxy.crawlera.com:8010", timeout, s.Logger)
 	url := r.URL.String()
 	responseCh := make(chan *http.Response, concurrentTries)
-	signal := time.Tick(time.Duration(waitGatewayResponseFor) * time.Second)
+	signal := time.Tick(timeout + time.Second)
 
 	for i := 0; i < concurrentTries; i++ {
 		go func(id int) {
