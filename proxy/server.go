@@ -5,6 +5,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 )
 
@@ -12,8 +14,17 @@ var concurrentTries int
 var waitGatewayResponseFor int
 
 func init() {
-	concurrentTries = 3
-	waitGatewayResponseFor = 6 // seconds
+	var err error
+
+	concurrentTries, err = strconv.Atoi(os.Getenv("GPM_CONCURRENT_TRIES"))
+	if err != nil {
+		concurrentTries = 3
+	}
+
+	waitGatewayResponseFor, err = strconv.Atoi(os.Getenv("GPM_WAIT_GATEWAY_RESPONSE_FOR"))
+	if err != nil {
+		waitGatewayResponseFor = 6 // seconds
+	}
 }
 
 type Server struct {
