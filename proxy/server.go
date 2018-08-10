@@ -63,16 +63,22 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.Logger.Printf("Path: %v\n", r.URL.Path)
 	s.Logger.Printf("Body: %v\n", r.Body)
 
+	// process the request and get the first good response
+	// if one actually arrives
 	response := s.processRequest(r)
 
+	// check if response is valid
 	if !response.IsValid() {
 		s.Logger.Println(response.GetError())
+		// return bad gateway if no valid response arrived
+		// @TODO maybe use some other format and/or status code
 		w.WriteHeader(http.StatusBadGateway)
 		w.Write([]byte("\r\nBad gateway"))
 		return
 	} else {
 		s.Logger.Println("Sending success response")
 
+		// copy response with headers to ResponseWriter
 		s.proxyResponse(w, response)
 	}
 
@@ -82,10 +88,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // proxyResponse - copies the client's first response body and header into
 // ResponseWriter object
 func (s *Server) proxyResponse(w http.ResponseWriter, response *FirstResponse) {
+	// copy all the headers
 	copyHeaders(w.Header(), response.GetHeader())
+	// copy status code
 	w.WriteHeader(response.GetStatusCode())
 
+	// copy body
 	bytesCopied, _ := io.Copy(w, response.GetBody())
+	// close body
 	if err := response.CloseBody(); err != nil {
 		s.Logger.Printf("Can't close response body %v", err)
 	}
@@ -96,10 +106,6 @@ func (s *Server) proxyResponse(w http.ResponseWriter, response *FirstResponse) {
 // processRequest - process incoming request by creating n goroutines to query the
 // incoming url
 func (s *Server) processRequest(r *http.Request) *FirstResponse {
-	defer func() {
-		s.Logger.Println("\nProcess request method exiting...")
-	}()
-
 	// set timeout
 	timeout := time.Duration(waitGatewayResponseFor) * time.Second
 	// create an http client with specified proxy transport
@@ -111,10 +117,21 @@ func (s *Server) processRequest(r *http.Request) *FirstResponse {
 	// ticker to detect a time out
 	signal := time.Tick(timeout + time.Second)
 
+	defer func() {
+		s.Logger.Println("\nProcess request method exiting...")
+	}()
+
 	// start n goroutines to query the url
 	for i := 0; i < concurrentTries; i++ {
 		go func(id int) {
-			defer s.Logger.Printf("\nClient request [%d] exiting...", id)
+			defer func() {
+				s.Logger.Printf("\nClient request [%d] exiting...", id)
+				// just in case something goes wrong
+				if r := recover(); r != nil {
+					s.Logger.Println("\nError! Recovered from ", r)
+				}
+			}()
+
 			// make a query
 			response, err := client.Get(url)
 			if err != nil {
