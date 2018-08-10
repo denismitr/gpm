@@ -72,18 +72,24 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if firstValidResponse.Response.StatusCode == http.StatusOK {
+	if firstValidResponse.Response.StatusCode >= 200 && firstValidResponse.Response.StatusCode < 300 {
 		s.Logger.Println("Sending success response")
-		w.WriteHeader(http.StatusOK)
+
+		copyHeaders(w.Header(), firstValidResponse.Response.Header)
+		w.WriteHeader(firstValidResponse.Response.StatusCode)
+
 		bytesCopied, _ := io.Copy(w, firstValidResponse.Response.Body)
 		if err := firstValidResponse.Response.Body.Close(); err != nil {
 			s.Logger.Printf("Can't close response body %v", err)
 		}
-		s.Logger.Printf("Copied %v bytes to client", bytesCopied)
+
+		s.Logger.Printf("Copied %v bytes to the client", bytesCopied)
 	} else {
 		w.WriteHeader(http.StatusBadGateway)
 		w.Write([]byte("\r\nBad gateway"))
 	}
+
+	s.Logger.Println("Done. Response delivered...")
 }
 
 func (s *Server) processRequest(r *http.Request) *FirstValidResponse {
@@ -99,7 +105,7 @@ func (s *Server) processRequest(r *http.Request) *FirstValidResponse {
 
 	for i := 0; i < concurrentTries; i++ {
 		go func(id int) {
-			defer s.Logger.Printf("\nGoroutine %d exiting...", id)
+			defer s.Logger.Printf("\nClient request [%d] exiting...", id)
 			response, err := client.Get(url)
 			if err != nil {
 				s.handleGatewayFailure(url, err)
