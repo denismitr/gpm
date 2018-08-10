@@ -103,7 +103,7 @@ func (s *Server) processRequest(r *http.Request) *FirstResponse {
 	// set timeout
 	timeout := time.Duration(waitGatewayResponseFor) * time.Second
 	// create an http client with specified proxy transport
-	client := NewClient("https://proxy.crawlera.com:8010", timeout, s.Logger)
+	client := NewClient("http://103.15.60.23:8080", timeout, s.Logger)
 	// extract the url from the request object
 	url := r.URL.String()
 	// make a new buffered response channel with the capacity of max concurrent tries
