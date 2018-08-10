@@ -31,12 +31,6 @@ type Server struct {
 	Logger *log.Logger
 }
 
-type FirstValidResponse struct {
-	Err      error
-	Response *http.Response
-	TimedOut bool
-}
-
 func (s *Server) handleFailure(w http.ResponseWriter, url string, err error) {
 	s.Logger.Printf("\nRequest to %s failed.", url)
 	s.Logger.Println(err)
@@ -65,34 +59,35 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.Logger.Printf("Path: %v\n", r.URL.Path)
 	s.Logger.Printf("Body: %v\n", r.Body)
 
-	firstValidResponse := s.processRequest(r)
+	response := s.processRequest(r)
 
-	if firstValidResponse.Err != nil {
-		s.Logger.Println(firstValidResponse.Err)
-		return
-	}
-
-	if firstValidResponse.Response.StatusCode >= 200 && firstValidResponse.Response.StatusCode < 300 {
-		s.Logger.Println("Sending success response")
-
-		copyHeaders(w.Header(), firstValidResponse.Response.Header)
-		w.WriteHeader(firstValidResponse.Response.StatusCode)
-
-		bytesCopied, _ := io.Copy(w, firstValidResponse.Response.Body)
-		if err := firstValidResponse.Response.Body.Close(); err != nil {
-			s.Logger.Printf("Can't close response body %v", err)
-		}
-
-		s.Logger.Printf("Copied %v bytes to the client", bytesCopied)
-	} else {
+	if !response.IsValid() {
+		s.Logger.Println(response.GetError())
 		w.WriteHeader(http.StatusBadGateway)
 		w.Write([]byte("\r\nBad gateway"))
+		return
+	} else {
+		s.Logger.Println("Sending success response")
+
+		s.proxyResponse(w, response)
 	}
 
 	s.Logger.Println("Done. Response delivered...")
 }
 
-func (s *Server) processRequest(r *http.Request) *FirstValidResponse {
+func (s *Server) proxyResponse(w http.ResponseWriter, response *FirstResponse) {
+	copyHeaders(w.Header(), response.GetHeader())
+	w.WriteHeader(response.GetStatusCode())
+
+	bytesCopied, _ := io.Copy(w, response.GetBody())
+	if err := response.CloseBody(); err != nil {
+		s.Logger.Printf("Can't close response body %v", err)
+	}
+
+	s.Logger.Printf("Copied %v bytes to the client", bytesCopied)
+}
+
+func (s *Server) processRequest(r *http.Request) *FirstResponse {
 	defer func() {
 		s.Logger.Println("\nProcess request method exiting...")
 	}()
@@ -124,17 +119,12 @@ func (s *Server) processRequest(r *http.Request) *FirstValidResponse {
 		select {
 		case firstResponse := <-responseCh:
 			s.Logger.Printf("\nReceived success response from %s", url)
-			return &FirstValidResponse{
-				Response: firstResponse,
-				Err:      nil,
-				TimedOut: false,
-			}
+			return NewValidFirstResponse(firstResponse)
 		case <-signal:
-			return &FirstValidResponse{
-				Response: nil,
-				Err:      fmt.Errorf("Timeout after waiting for %d seconds", waitGatewayResponseFor),
-				TimedOut: true,
-			}
+			return NewInvalidFirstResponse(
+				fmt.Errorf("Timeout after waiting for %d seconds", waitGatewayResponseFor),
+				true,
+			)
 		}
 	}
 }
