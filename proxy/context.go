@@ -2,9 +2,12 @@ package proxy
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +29,7 @@ type RequestContext struct {
 
 	client    *http.Client
 	transport *http.Transport
+	proxyAuth string
 	logger    *log.Logger
 	timeout   time.Duration
 
@@ -99,6 +103,10 @@ func (rc *RequestContext) SafeClose() {
 func (rc *RequestContext) createRequest() *http.Request {
 	req, _ := http.NewRequest(rc.resolveMethod(), rc.resolveUrl(), nil)
 
+	// dump the request to the console
+	dump, _ := httputil.DumpRequest(req, false)
+	fmt.Println(string(dump))
+
 	return req.WithContext(rc.context)
 }
 
@@ -171,9 +179,17 @@ func (rc *RequestContext) resolveMethod() string {
 }
 
 // NewRequestContext - create new request context
-func NewRequestContext(originalRequest *http.Request, logger *log.Logger, session int64) *RequestContext {
+func NewRequestContext(originalRequest *http.Request, logger *log.Logger, session int64) (*RequestContext, error) {
+	proxyURL, err := url.Parse(getProxyStr())
+	if err != nil {
+		return nil, err
+	}
+
+	tlsClientSkipVerify := &tls.Config{InsecureSkipVerify: true}
+
 	timeout := time.Duration(waitGatewayResponseFor) * time.Second
-	transport := &http.Transport{}
+	transport := &http.Transport{TLSClientConfig: tlsClientSkipVerify}
+	transport.Proxy = http.ProxyURL(proxyURL)
 	ctx, cancel := context.WithTimeout(originalRequest.Context(), timeout)
 
 	return &RequestContext{
@@ -189,5 +205,6 @@ func NewRequestContext(originalRequest *http.Request, logger *log.Logger, sessio
 		transport:       transport,
 		client:          NewClient(transport),
 		session:         session,
-	}
+		proxyAuth:       getProxyAuth(),
+	}, nil
 }

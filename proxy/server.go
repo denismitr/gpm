@@ -26,16 +26,6 @@ func init() {
 	if err != nil {
 		waitGatewayResponseFor = 6 // seconds
 	}
-
-	proxyUrl = os.Getenv("GPM_PROXY_URL")
-	if proxyUrl == "" {
-		proxyUrl = "http://103.15.60.23:8080"
-	}
-
-	proxyAuth = os.Getenv("GPM_PROXY_AUTH")
-	if proxyAuth == "" {
-		proxyAuth = ""
-	}
 }
 
 // Server struct handles all the proxy related actions from serving
@@ -63,7 +53,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.Logger.Printf("Body: %v\n", r.Body)
 
 	// create new context
-	requestContext := NewRequestContext(r, s.Logger, atomic.AddInt64(&s.session, 1))
+	requestContext, err := NewRequestContext(r, s.Logger, atomic.AddInt64(&s.session, 1))
+	if err != nil {
+		s.Logger.Println(err)
+		// return bad gateway if no valid response arrived
+		// @TODO maybe use some other format and/or status code
+		w.WriteHeader(http.StatusBadGateway)
+		w.Write([]byte("\r\nBad gateway"))
+		return
+	}
 
 	// process the request and get the first good response
 	// if one actually arrives
