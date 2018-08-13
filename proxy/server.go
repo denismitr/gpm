@@ -26,6 +26,16 @@ func init() {
 	if err != nil {
 		waitGatewayResponseFor = 6 // seconds
 	}
+
+	proxyUrl = os.Getenv("GPM_PROXY_URL")
+	if proxyUrl == "" {
+		proxyUrl = "http://103.15.60.23:8080"
+	}
+
+	proxyAuth = os.Getenv("GPM_PROXY_AUTH")
+	if proxyAuth == "" {
+		proxyAuth = ""
+	}
 }
 
 // Server struct handles all the proxy related actions from serving
@@ -34,19 +44,6 @@ func init() {
 type Server struct {
 	Logger  *log.Logger
 	session int64
-}
-
-func (s *Server) handleFailure(w http.ResponseWriter, url string, err error) {
-	s.Logger.Printf("\nRequest to %s failed.", url)
-	s.Logger.Println(err)
-
-	w.WriteHeader(http.StatusBadGateway)
-	w.Write([]byte("\r\nBad gateway"))
-}
-
-func (s *Server) handleGatewayFailure(url string, err error) {
-	s.Logger.Printf("\nRequest to %s failed.", url)
-	s.Logger.Println(err)
 }
 
 // ServeHTTP - handle HTTP request
@@ -70,7 +67,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// process the request and get the first good response
 	// if one actually arrives
-	response := ctx.processRequest()
+	go ctx.processRequest()
+
+	response := <-ctx.FirstResponse
 
 	// check if response is valid
 	if !response.IsValid() {
@@ -80,14 +79,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 		w.Write([]byte("\r\nBad gateway"))
 		return
-	} else {
-		s.Logger.Println("Sending success response")
-
-		// copy response with headers to ResponseWriter
-		s.proxyResponse(w, response)
 	}
 
-	s.Logger.Println("Done. Response delivered...")
+	s.Logger.Printf("Sending success response from session %d", s.session)
+
+	// copy response with headers to ResponseWriter
+	s.proxyResponse(w, response)
+
+	s.Logger.Printf("Done. Response delivered. Session [%d] is closed...", s.session)
 }
 
 // proxyResponse - copies the client's first response body and header into

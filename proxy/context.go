@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 )
 
 type RequestContext struct {
 	originalRequest *http.Request
-	firstResponse   *FirstResponse
+	FirstResponse   chan *FirstResponse
 	// a buffered response channel with the capacity of max concurrent tries
 	responseCh chan *http.Response
 	client     *http.Client
@@ -17,17 +18,20 @@ type RequestContext struct {
 	timeout    time.Duration
 
 	session int64
+
+	mu   sync.Mutex
+	done bool
 }
 
-func (rc *RequestContext) processRequest() *FirstResponse {
+func (rc *RequestContext) processRequest() {
 	// extract the url from the request object
 	url := rc.originalRequest.URL.String()
 
 	// ticker to detect a time out
-	signal := time.Tick(rc.timeout + time.Second)
+	timeout := time.Tick(rc.timeout + time.Second)
 
 	defer func() {
-		rc.logger.Println("\nProcess request method exiting...")
+		rc.logger.Printf("\nProcess request [session %d] method exiting...", rc.session)
 	}()
 
 	// start n goroutines to query the url
@@ -51,7 +55,9 @@ func (rc *RequestContext) processRequest() *FirstResponse {
 
 			// check if response is one of 2**
 			if response.StatusCode >= 200 && response.StatusCode < 300 {
-				rc.responseCh <- response
+				if !rc.done {
+					rc.responseCh <- response
+				}
 			} else {
 				// @TODO handle errors gracefully
 				rc.logger.Printf("\nError status %d received from %s", response.StatusCode, url)
@@ -65,21 +71,38 @@ func (rc *RequestContext) processRequest() *FirstResponse {
 		case firstResponse := <-rc.responseCh:
 			rc.logger.Printf("\nReceived success response from %s", url)
 			// create a valid first response object and return
-			return NewValidFirstResponse(firstResponse)
-		case <-signal:
+			rc.FirstResponse <- NewValidFirstResponse(firstResponse)
+
+			rc.close()
+
+			return
+		case <-timeout:
 			// on time out create an invalid first response and return
-			return NewInvalidFirstResponse(
+			rc.FirstResponse <- NewInvalidFirstResponse(
 				fmt.Errorf("Timeout after waiting for %d seconds", waitGatewayResponseFor),
 				true,
 			)
+
+			rc.close()
+
+			return
 		}
 	}
+}
+
+func (rc *RequestContext) close() {
+	rc.mu.Lock()
+	rc.done = true
+	rc.mu.Unlock()
+	close(rc.responseCh)
+	close(rc.FirstResponse)
 }
 
 func NewRequestContext(originalRequest *http.Request, logger *log.Logger, session int64) *RequestContext {
 	timeout := time.Duration(waitGatewayResponseFor) * time.Second
 
 	return &RequestContext{
+		FirstResponse:   make(chan *FirstResponse),
 		originalRequest: originalRequest,
 		responseCh:      make(chan *http.Response, concurrentTries),
 		logger:          logger,
