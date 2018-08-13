@@ -63,13 +63,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.Logger.Printf("Body: %v\n", r.Body)
 
 	// create new context
-	ctx := NewRequestContext(r, s.Logger, atomic.AddInt64(&s.session, 1))
+	requestContext := NewRequestContext(r, s.Logger, atomic.AddInt64(&s.session, 1))
 
 	// process the request and get the first good response
 	// if one actually arrives
-	go ctx.processRequest()
+	go requestContext.processRequest()
 
-	response := <-ctx.FirstResponse
+	response := <-requestContext.FirstResponse
 
 	// check if response is valid
 	if !response.IsValid() {
@@ -85,6 +85,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// copy response with headers to ResponseWriter
 	s.proxyResponse(w, response)
+	requestContext.SafeClose()
 
 	s.Logger.Printf("Done. Response delivered. Session [%d] is closed...", s.session)
 }

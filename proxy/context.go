@@ -1,113 +1,188 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
 
+// RequestContext - orchestrates making HTTP requests to the requested URL
 type RequestContext struct {
+	// holds original request that came from the end user
 	originalRequest *http.Request
-	FirstResponse   chan *FirstResponse
+
+	// channel for passing the first response from the multiple requests
+	FirstResponse chan *FirstResponse
 	// a buffered response channel with the capacity of max concurrent tries
 	responseCh chan *http.Response
-	client     *http.Client
-	logger     *log.Logger
-	timeout    time.Duration
+	// channel to indicate when response got received and we are done
+	doneCh chan struct{}
+	// ticker to detect a time out
+	timeoutCh <-chan time.Time
 
-	session int64
+	client    *http.Client
+	transport *http.Transport
+	logger    *log.Logger
+	timeout   time.Duration
 
+	session      int64
+	context      context.Context
+	canelContext context.CancelFunc
+
+	// mutexes
 	mu   sync.Mutex
+	once sync.Once
+	// indicates whether response was received
 	done bool
 }
 
 func (rc *RequestContext) processRequest() {
-	// extract the url from the request object
-	url := rc.originalRequest.URL.String()
-
-	// ticker to detect a time out
-	timeout := time.Tick(rc.timeout + time.Second)
-
 	defer func() {
-		rc.logger.Printf("\nProcess request [session %d] method exiting...", rc.session)
+		rc.logger.Printf("\nProcess request [context %d] method exiting...", rc.session)
 	}()
 
 	// start n goroutines to query the url
-	for i := 0; i < concurrentTries; i++ {
-		go func(id int) {
-			defer func() {
-				rc.logger.Printf("\nClient request [%d] exiting...", id)
-				// just in case something goes wrong
-				if r := recover(); r != nil {
-					rc.logger.Println("\nError! Recovered from ", r)
-				}
-			}()
-
-			// make a query
-			response, err := rc.client.Get(url)
-			if err != nil {
-				// @TODO handle errors gracefully
-				rc.logger.Printf("\nRequest to %s failed with error %s", url, err.Error())
-				return
-			}
-
-			// check if response is one of 2**
-			if response.StatusCode >= 200 && response.StatusCode < 300 {
-				if !rc.done {
-					rc.responseCh <- response
-				}
-			} else {
-				// @TODO handle errors gracefully
-				rc.logger.Printf("\nError status %d received from %s", response.StatusCode, url)
-			}
-		}(i)
+	for i := 1; i <= concurrentTries; i++ {
+		go rc.makeRequest(i)
 	}
 
 	for {
 		select {
 		// catch a first 2** response
 		case firstResponse := <-rc.responseCh:
-			rc.logger.Printf("\nReceived success response from %s", url)
+			rc.markAsDone()
+
 			// create a valid first response object and return
 			rc.FirstResponse <- NewValidFirstResponse(firstResponse)
 
-			rc.close()
-
 			return
-		case <-timeout:
+		case <-rc.timeoutCh:
+			rc.markAsDone()
+
 			// on time out create an invalid first response and return
 			rc.FirstResponse <- NewInvalidFirstResponse(
-				fmt.Errorf("Timeout after waiting for %d seconds", waitGatewayResponseFor),
+				fmt.Errorf("Timeout on session [%d] after waiting for %d seconds", rc.session, waitGatewayResponseFor),
 				true,
 			)
-
-			rc.close()
 
 			return
 		}
 	}
 }
 
-func (rc *RequestContext) close() {
+func (rc *RequestContext) markAsDone() {
 	rc.mu.Lock()
 	rc.done = true
 	rc.mu.Unlock()
-	close(rc.responseCh)
-	close(rc.FirstResponse)
 }
 
+// SafeClose - Safely close all the channels
+func (rc *RequestContext) SafeClose() {
+	rc.once.Do(func() {
+		close(rc.responseCh)
+		close(rc.FirstResponse)
+		rc.canelContext()
+		rc.logger.Printf("Request context [%d] in now closed", rc.session)
+	})
+}
+
+func (rc *RequestContext) createRequest() *http.Request {
+	req, _ := http.NewRequest(rc.resolveMethod(), rc.resolveUrl(), nil)
+
+	return req.WithContext(rc.context)
+}
+
+func (rc *RequestContext) makeRequest(index int) {
+	defer func() {
+		rc.logger.Printf("\nClient request [%d:%d] exiting...", rc.session, index)
+		// just in case something goes wrong
+		if r := recover(); r != nil {
+			rc.logger.Println("\nError! Recovered from ", r)
+		}
+	}()
+
+	req := rc.createRequest()
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				rc.logger.Println("\nError! Recovered from ", r)
+			}
+		}()
+
+		// make a query
+		response, err := rc.client.Do(req)
+		if err != nil {
+			if strings.Contains(err.Error(), "context canceled") {
+				rc.logger.Printf("\nRequest to %s within session [%d] got cancelled", req.URL, rc.session)
+			} else {
+				rc.logger.Printf("\nRequest to %s failed with error [%s]", req.URL, err.Error())
+			}
+			return
+		}
+
+		// check if response is one of 2**
+		if response.StatusCode >= 200 && response.StatusCode < 300 {
+			if !rc.done {
+				rc.responseCh <- response
+				close(rc.doneCh)
+				return
+			} else {
+				rc.logger.Printf("\nResponse to request to %s already received", req.URL)
+			}
+		} else {
+			rc.logger.Printf("\nError status %d received from %s", response.StatusCode, req.URL)
+		}
+
+		response.Body.Close()
+	}()
+
+	select {
+	case <-rc.doneCh:
+		rc.logger.Printf("Job on session [%d] is done. Cancelling remaining requests", rc.session)
+		rc.transport.CancelRequest(req)
+		return
+	case <-rc.context.Done():
+		rc.logger.Printf("Context on session [%d] is done. Cancelling remaining requests", rc.session)
+		rc.transport.CancelRequest(req)
+		return
+	case <-rc.timeoutCh:
+		rc.logger.Printf("Timeout received on session [%d]. Cancelling remaining requests", rc.session)
+		rc.transport.CancelRequest(req)
+		return
+	}
+}
+
+func (rc *RequestContext) resolveUrl() string {
+	return rc.originalRequest.URL.String()
+}
+
+func (rc *RequestContext) resolveMethod() string {
+	return rc.originalRequest.Method
+}
+
+// NewRequestContext - create new request context
 func NewRequestContext(originalRequest *http.Request, logger *log.Logger, session int64) *RequestContext {
 	timeout := time.Duration(waitGatewayResponseFor) * time.Second
+	transport := &http.Transport{}
+	ctx, cancel := context.WithTimeout(originalRequest.Context(), timeout)
 
 	return &RequestContext{
 		FirstResponse:   make(chan *FirstResponse),
 		originalRequest: originalRequest,
-		responseCh:      make(chan *http.Response, concurrentTries),
+		context:         ctx,
+		canelContext:    cancel,
+		responseCh:      make(chan *http.Response, 1),
+		doneCh:          make(chan struct{}),
 		logger:          logger,
+		timeoutCh:       time.Tick(timeout + time.Second),
 		timeout:         timeout,
-		client:          NewClient(proxyUrl, proxyAuth, timeout, logger),
+		transport:       transport,
+		client:          NewClient(transport),
 		session:         session,
 	}
 }
