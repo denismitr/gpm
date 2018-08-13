@@ -76,8 +76,14 @@ func (rc *RequestContext) processRequest() {
 
 func (rc *RequestContext) markAsDone() {
 	rc.mu.Lock()
+	defer rc.mu.Unlock()
 	rc.done = true
-	rc.mu.Unlock()
+}
+
+func (rc *RequestContext) IsDone() bool {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	return rc.done
 }
 
 // SafeClose - Safely close all the channels
@@ -127,13 +133,12 @@ func (rc *RequestContext) makeRequest(index int) {
 
 		// check if response is one of 2**
 		if response.StatusCode >= 200 && response.StatusCode < 300 {
-			if !rc.done {
+			if !rc.IsDone() {
 				rc.responseCh <- response
 				close(rc.doneCh)
 				return
-			} else {
-				rc.logger.Printf("\nResponse to request to %s already received", req.URL)
 			}
+			rc.logger.Printf("\nResponse to request to %s already received", req.URL)
 		} else {
 			rc.logger.Printf("\nError status %d received from %s", response.StatusCode, req.URL)
 		}
