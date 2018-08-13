@@ -1,17 +1,18 @@
 package proxy
 
 import (
-	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
-	"time"
+	"sync/atomic"
 )
 
 var concurrentTries int
 var waitGatewayResponseFor int
+var proxyUrl string
+var proxyAuth string
 
 func init() {
 	var err error
@@ -31,7 +32,8 @@ func init() {
 // incoming HTTP request to querying the proxied url,
 // copying body and headers of the first response to the ResponseWriter
 type Server struct {
-	Logger *log.Logger
+	Logger  *log.Logger
+	session int64
 }
 
 func (s *Server) handleFailure(w http.ResponseWriter, url string, err error) {
@@ -63,9 +65,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.Logger.Printf("Path: %v\n", r.URL.Path)
 	s.Logger.Printf("Body: %v\n", r.Body)
 
+	// create new context
+	ctx := NewRequestContext(r, s.Logger, atomic.AddInt64(&s.session, 1))
+
 	// process the request and get the first good response
 	// if one actually arrives
-	response := s.processRequest(r)
+	response := ctx.processRequest()
 
 	// check if response is valid
 	if !response.IsValid() {
@@ -101,70 +106,6 @@ func (s *Server) proxyResponse(w http.ResponseWriter, response *FirstResponse) {
 	}
 
 	s.Logger.Printf("Copied %v bytes to the client", bytesCopied)
-}
-
-// processRequest - process incoming request by creating n goroutines to query the
-// incoming url
-func (s *Server) processRequest(r *http.Request) *FirstResponse {
-	// set timeout
-	timeout := time.Duration(waitGatewayResponseFor) * time.Second
-	// create an http client with specified proxy transport
-	client := NewClient("http://103.15.60.23:8080", timeout, s.Logger)
-	// extract the url from the request object
-	url := r.URL.String()
-	// make a new buffered response channel with the capacity of max concurrent tries
-	responseCh := make(chan *http.Response, concurrentTries)
-	// ticker to detect a time out
-	signal := time.Tick(timeout + time.Second)
-
-	defer func() {
-		s.Logger.Println("\nProcess request method exiting...")
-	}()
-
-	// start n goroutines to query the url
-	for i := 0; i < concurrentTries; i++ {
-		go func(id int) {
-			defer func() {
-				s.Logger.Printf("\nClient request [%d] exiting...", id)
-				// just in case something goes wrong
-				if r := recover(); r != nil {
-					s.Logger.Println("\nError! Recovered from ", r)
-				}
-			}()
-
-			// make a query
-			response, err := client.Get(url)
-			if err != nil {
-				// @TODO handle errors gracefully
-				s.handleGatewayFailure(url, err)
-				return
-			}
-
-			// check if response is one of 2**
-			if response.StatusCode >= 200 && response.StatusCode < 300 {
-				responseCh <- response
-			} else {
-				// @TODO handle errors gracefully
-				s.handleGatewayFailure(url, fmt.Errorf("Error status %d", response.StatusCode))
-			}
-		}(i)
-	}
-
-	for {
-		select {
-		// catch a first 2** response
-		case firstResponse := <-responseCh:
-			s.Logger.Printf("\nReceived success response from %s", url)
-			// create a valid first response object and return
-			return NewValidFirstResponse(firstResponse)
-		case <-signal:
-			// on time out create an invalid first response and return
-			return NewInvalidFirstResponse(
-				fmt.Errorf("Timeout after waiting for %d seconds", waitGatewayResponseFor),
-				true,
-			)
-		}
-	}
 }
 
 // NewServer - creates a new proxy server
