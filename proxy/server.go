@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -22,8 +23,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		s.Logger.Printf("\nServe HTTP exiting session [%d]...", s.session)
 		if r := recover(); r != nil {
-			s.Logger.Printf("\nError occurred during Serve HTTP! Recovered from %v", r)
+			msg := fmt.Sprintf("Error occurred during Serve HTTP! Recovered from %v", r)
+			s.Logger.Println(msg)
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("\r\n" + msg))
 		}
+
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("\r\nBad gateway"))
 	}()
 
 	s.Logger.Printf("Headers: %v\n", r.Header)
@@ -39,6 +46,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.Logger.Printf("Query: %v\n", r.URL.Query())
 	s.Logger.Printf("Path: %v\n", r.URL.Path)
 	s.Logger.Printf("Body: %v\n", r.Body)
+
+	if r.Method == "CONNECT" {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("\r\nPlease don't use https"))
+		return
+	}
 
 	// create new context
 	requestContext, err := NewRequestContext(r, s.Logger, atomic.AddInt64(&s.session, 1))

@@ -36,7 +36,8 @@ type RequestContext struct {
 	transport *http.Transport
 	// proxy auth string can be included into headers or prepended to the proxy url
 	proxyAuth string
-	logger    *log.Logger
+	// logger
+	logger *log.Logger
 	// max timeout
 	timeout time.Duration
 	// number of concurrent request that multiplexer method should produce
@@ -49,11 +50,13 @@ type RequestContext struct {
 	context      context.Context
 	canelContext context.CancelFunc
 
+	// List of errors
 	errors []error
 
 	// mutexes
-	mu   sync.Mutex
-	once sync.Once
+	doneMu  sync.Mutex
+	errorMu sync.Mutex
+	once    sync.Once
 
 	// Timestamps
 	startedAt time.Time
@@ -112,8 +115,8 @@ func (rc *RequestContext) processRequest() {
 // after that RequestContext should not perform any action
 // all outgoing requests should be canceled
 func (rc *RequestContext) finish() {
-	rc.mu.Lock()
-	defer rc.mu.Unlock()
+	rc.doneMu.Lock()
+	defer rc.doneMu.Unlock()
 	rc.done = true
 	close(rc.doneCh)
 
@@ -122,28 +125,28 @@ func (rc *RequestContext) finish() {
 
 // IsDone - checks whether RequestContext is done with it's activity
 func (rc *RequestContext) IsDone() bool {
-	rc.mu.Lock()
-	defer rc.mu.Unlock()
+	rc.doneMu.Lock()
+	defer rc.doneMu.Unlock()
 	return rc.done
 }
 
 // GetErrors - retrieves final error message
 func (rc *RequestContext) GetErrors() []error {
-	rc.mu.Lock()
-	defer rc.mu.Unlock()
+	rc.errorMu.Lock()
+	defer rc.errorMu.Unlock()
 	return rc.errors
 }
 
 // GetErrorsCount - Get a count of errors that have occured in the multiplexer
 func (rc *RequestContext) GetErrorsCount() int {
-	rc.mu.Lock()
-	defer rc.mu.Unlock()
+	rc.errorMu.Lock()
+	defer rc.errorMu.Unlock()
 	return len(rc.errors)
 }
 
 func (rc *RequestContext) addError(err error) {
-	rc.mu.Lock()
-	defer rc.mu.Unlock()
+	rc.errorMu.Lock()
+	defer rc.errorMu.Unlock()
 	rc.errors = append(rc.errors, err)
 }
 
@@ -236,10 +239,6 @@ func (rc *RequestContext) multiplexer(index int) {
 		rc.logger.Printf("Context on session [%d] was cancelled. Cancelling remaining requests", rc.session)
 		rc.transport.CancelRequest(req)
 		return
-	case <-rc.timeoutCh:
-		rc.logger.Printf("Timeout received on session [%d]. Cancelling remaining requests", rc.session)
-		rc.transport.CancelRequest(req)
-		return
 	}
 }
 
@@ -268,10 +267,12 @@ func NewRequestContext(originalRequest *http.Request, logger *log.Logger, sessio
 	tlsClientSkipVerify := &tls.Config{InsecureSkipVerify: true}
 
 	timeout := time.Duration(getMaxTimeout()) * time.Second
+	//create and prepare the transport
 	transport := &http.Transport{TLSClientConfig: tlsClientSkipVerify}
 	// transport.Proxy = http.ProxyURL(proxyURL)
 	ctx, cancel := context.WithTimeout(originalRequest.Context(), timeout)
 
+	// how many concurrent requests should be sent to destination URL
 	cuncurrentTries := getConcurrentTries()
 
 	return &RequestContext{
