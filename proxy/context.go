@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -260,17 +261,17 @@ func (rc *RequestContext) resolveMethod() string {
 func NewRequestContext(originalRequest *http.Request, logger *log.Logger, session int64) (*RequestContext, error) {
 	// it is better to initialize proxy here, so that
 	// if env variables change service does not have to get restarted
-	// proxyURL, err := url.Parse(getProxyStr())
-	// if err != nil {
-	// 	return nil, err
-	// }
+	proxyURL, err := url.Parse(getProxyStr())
+	if err != nil {
+		return nil, err
+	}
 
 	tlsClientSkipVerify := &tls.Config{InsecureSkipVerify: true}
 
 	timeout := time.Duration(getMaxTimeout()) * time.Second
 	//create and prepare the transport
 	transport := &http.Transport{TLSClientConfig: tlsClientSkipVerify}
-	// transport.Proxy = http.ProxyURL(proxyURL)
+	transport.Proxy = http.ProxyURL(proxyURL)
 	ctx, cancel := context.WithTimeout(originalRequest.Context(), timeout)
 
 	// how many concurrent requests should be sent to destination URL
