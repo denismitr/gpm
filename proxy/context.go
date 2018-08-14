@@ -30,13 +30,21 @@ type RequestContext struct {
 	// ticker to detect a time out
 	timeoutCh <-chan time.Time
 
-	client          *http.Client
-	transport       *http.Transport
-	proxyAuth       string
-	logger          *log.Logger
-	timeout         time.Duration
+	// HTTP client
+	client *http.Client
+	// Transport with TSL configuration and proxy settings
+	transport *http.Transport
+	// proxy auth string can be included into headers or prepended to the proxy url
+	proxyAuth string
+	logger    *log.Logger
+	// max timeout
+	timeout time.Duration
+	// number of concurrent request that multiplexer method should produce
 	concurrentTries int
 
+	// unique session identifier
+	// it can be used not only to dintinguish processes
+	// but potentially to link request context with server Serve HTTP
 	session      int64
 	context      context.Context
 	canelContext context.CancelFunc
@@ -188,7 +196,7 @@ func (rc *RequestContext) multiplexer(index int) {
 		response, err := rc.client.Do(req)
 		if err != nil {
 			// we don't want to register an error when context has timed out
-			// for timout there is a specialized handler
+			// for any timout logic there is a specialized handler
 			if strings.Contains(err.Error(), "context") || strings.Contains(err.Error(), "canceled") {
 				rc.logger.Printf("\nRequest to %s within session [%d] got cancelled", req.URL, rc.session)
 			} else {
@@ -215,6 +223,7 @@ func (rc *RequestContext) multiplexer(index int) {
 					rc.session))
 		}
 
+		// close response body of any response that was not passed to the channel
 		response.Body.Close()
 	}()
 
