@@ -4,40 +4,28 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
-	"strconv"
 	"sync/atomic"
 )
-
-var concurrentTries int
-var waitGatewayResponseFor int
-var proxyUrl string
-var proxyAuth string
-
-func init() {
-	var err error
-
-	concurrentTries, err = strconv.Atoi(os.Getenv("GPM_CONCURRENT_TRIES"))
-	if err != nil {
-		concurrentTries = 3
-	}
-
-	waitGatewayResponseFor, err = strconv.Atoi(os.Getenv("GPM_WAIT_GATEWAY_RESPONSE_FOR"))
-	if err != nil {
-		waitGatewayResponseFor = 6 // seconds
-	}
-}
 
 // Server struct handles all the proxy related actions from serving
 // incoming HTTP request to querying the proxied url,
 // copying body and headers of the first response to the ResponseWriter
 type Server struct {
-	Logger  *log.Logger
+	Logger *log.Logger
+
+	// stores unique session number
 	session int64
 }
 
 // ServeHTTP - handle HTTP request
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	defer func() {
+		s.Logger.Printf("\nServe HTTP exiting session [%d]...", s.session)
+		if r := recover(); r != nil {
+			s.Logger.Printf("\nError occurred during Serve HTTP! Recovered from %v", r)
+		}
+	}()
+
 	s.Logger.Printf("Headers: %v\n", r.Header)
 	s.Logger.Printf("Host: %v\n", r.Host)
 	s.Logger.Printf("Scheme: %v\n", r.URL.Scheme)
@@ -75,17 +63,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// return bad gateway if no valid response arrived
 		// @TODO maybe use some other format and/or status code
 		w.WriteHeader(http.StatusBadGateway)
-		w.Write([]byte("\r\nBad gateway"))
+		w.Write([]byte("\r\n" + response.GetError().Error()))
 		return
 	}
 
-	s.Logger.Printf("Sending success response from session %d", s.session)
+	s.Logger.Printf(
+		"Sending success response from session %d after %.3f seconds of processing", s.session, response.GetElapsedSeconds())
 
 	// copy response with headers to ResponseWriter
 	s.proxyResponse(w, response)
 	requestContext.SafeClose()
 
-	s.Logger.Printf("Done. Response delivered. Session [%d] is closed...", s.session)
+	s.Logger.Printf(
+		"Done. Response delivered. Session [%d] is now closed...", s.session)
 }
 
 // proxyResponse - copies the client's first response body and header into

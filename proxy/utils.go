@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -39,4 +40,22 @@ func getProxyAuth() string {
 		proxyAuth = "" // @TODO or not TODO
 	}
 	return proxyAuth
+}
+
+func getConcurrentTries() int {
+	concurrentTries, err := strconv.Atoi(os.Getenv("GPM_CONCURRENT_TRIES"))
+	if err != nil {
+		concurrentTries = 3
+	}
+
+	return concurrentTries
+}
+
+func getMaxTimeout() int {
+	maxTimeout, err := strconv.Atoi(os.Getenv("GPM_MAX_TIMEOUT"))
+	if err != nil {
+		maxTimeout = 10 // seconds
+	}
+
+	return maxTimeout
 }
