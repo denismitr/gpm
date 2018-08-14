@@ -155,9 +155,12 @@ func (rc *RequestContext) SafeClose() {
 	rc.once.Do(func() {
 		close(rc.responseCh)
 		close(rc.FirstResponse)
+		close(rc.errorCh)
 		rc.canelContext()
 		rc.logger.Printf("Request context [%d] in now closed", rc.session)
 	})
+
+	// PrintMemUsage()
 }
 
 // GetElapsedTime - get time elapsed since the processing started
@@ -180,8 +183,7 @@ func (rc *RequestContext) multiplexer(index int) {
 		rc.logger.Printf("\nClient request [%d:%d] exiting...", rc.session, index)
 		// just in case something goes wrong
 		if r := recover(); r != nil {
-			rc.errorOccurred(
-				fmt.Errorf("\nError! Recovered from %v", r))
+			rc.logger.Printf("\nError! Recovered from %v", r)
 		}
 	}()
 
@@ -190,8 +192,7 @@ func (rc *RequestContext) multiplexer(index int) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				rc.errorOccurred(
-					fmt.Errorf("\nError! Recovered from %v", r))
+				rc.logger.Printf("\nError! Recovered from %v", r)
 			}
 		}()
 
