@@ -10,6 +10,8 @@ import (
 )
 
 func copyHeaders(dest, src http.Header) {
+	src.Del("Content-Length")
+
 	for key, values := range src {
 		for _, value := range values {
 			dest.Add(key, value)

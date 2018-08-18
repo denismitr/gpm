@@ -54,13 +54,12 @@ func (s *Server) ProxyGetRequest(next http.Handler) http.Handler {
 		go requestContext.processRequest()
 
 		response := <-requestContext.FirstResponse
+		requestContext.SafeClose()
 
 		s.logger.Printf("Done. Response for session %d received.", s.session)
 
 		ctx := context.WithValue(r.Context(), responseKey, response)
 		next.ServeHTTP(w, r.WithContext(ctx))
-
-		requestContext.SafeClose()
 	})
 }
 

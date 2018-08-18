@@ -1,13 +1,14 @@
 package main
 
 import (
-	"gpm/proxy"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
 	"time"
+
+	"github.com/denismitr/gpm/proxy"
 
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
