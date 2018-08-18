@@ -4,17 +4,15 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"log"
 	"net/http"
 	"net/http/httputil"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
 )
 
-// RequestContext - orchestrates making HTTP requests to the requested URL
-type RequestContext struct {
+// Multiplexer - orchestrates making HTTP requests to the requested URL
+type Multiplexer struct {
 	// holds original request that came from the end user
 	originalRequest *http.Request
 
@@ -38,7 +36,7 @@ type RequestContext struct {
 	// proxy auth string can be included into headers or prepended to the proxy url
 	proxyAuth string
 	// logger
-	logger *log.Logger
+	logger Logger
 	// max timeout
 	timeout time.Duration
 	// number of concurrent request that multiplexer method should produce
@@ -63,49 +61,49 @@ type RequestContext struct {
 	startedAt time.Time
 }
 
-func (rc *RequestContext) processRequest() {
+func (m *Multiplexer) processRequest() {
 	defer func() {
-		rc.logger.Printf("\nProcess request [context %d] method exiting...", rc.session)
+		m.logger.Printf("\nProcess request [context %d] method exiting...", m.session)
 	}()
 
 	// mark the begining of request processing
-	rc.startedAt = time.Now().UTC()
+	m.startedAt = time.Now().UTC()
 
 	// start n goroutines to query the url
-	for i := 1; i <= rc.concurrentTries; i++ {
-		go rc.multiplexer(i)
+	for i := 1; i <= m.concurrentTries; i++ {
+		go m.multiplex(i)
 	}
 
 	for {
 		select {
 		// catch a first 2** response
-		case firstResponse := <-rc.responseCh:
-			rc.finish()
+		case firstResponse := <-m.responseCh:
+			m.finish()
 
 			// create a valid first response object and return
-			rc.FirstResponse <- NewValidFirstResponse(firstResponse, rc.GetElapsedTime())
+			m.FirstResponse <- NewValidFirstResponse(firstResponse, m.GetElapsedTime())
 
 			return
-		case newErr := <-rc.errorCh:
-			rc.addError(newErr)
+		case newErr := <-m.errorCh:
+			m.addError(newErr)
 
-			if rc.GetErrorsCount() > rc.concurrentTries {
-				rc.finish()
-				rc.FirstResponse <- NewInvalidFirstResponse(
-					fmt.Errorf("all %d requests on session [%d] failed with errors", rc.concurrentTries, rc.session),
+			if m.GetErrorsCount() >= m.concurrentTries {
+				m.finish()
+				m.FirstResponse <- NewInvalidFirstResponse(
+					fmt.Errorf("all %d requests on session [%d] failed with errors", m.concurrentTries, m.session),
 					false,
-					rc.GetElapsedTime())
+					m.GetElapsedTime())
 
 				return
 			}
-		case <-rc.timeoutCh:
-			rc.finish()
+		case <-m.timeoutCh:
+			m.finish()
 
 			// on time out create an invalid first response and return
-			rc.FirstResponse <- NewInvalidFirstResponse(
-				fmt.Errorf("all requests on session [%d] failed with timeout after waiting for %.3f seconds", rc.session, rc.timeout.Seconds()),
+			m.FirstResponse <- NewInvalidFirstResponse(
+				fmt.Errorf("all requests on session [%d] failed with timeout after waiting for %.3f seconds", m.session, m.timeout.Seconds()),
 				true,
-				rc.GetElapsedTime())
+				m.GetElapsedTime())
 
 			return
 		}
@@ -115,97 +113,99 @@ func (rc *RequestContext) processRequest() {
 // finish - closes the doneCh and marks done flag as true
 // after that RequestContext should not perform any action
 // all outgoing requests should be canceled
-func (rc *RequestContext) finish() {
-	rc.doneMu.Lock()
-	defer rc.doneMu.Unlock()
-	rc.done = true
-	close(rc.doneCh)
+func (m *Multiplexer) finish() {
+	m.doneMu.Lock()
+	defer m.doneMu.Unlock()
+	m.done = true
+	close(m.doneCh)
 
-	rc.logger.Printf("List of errors for session [%d]: %v", rc.session, rc.errors)
+	m.logger.Printf("List of errors for session [%d]: %v", m.session, m.errors)
 }
 
 // IsDone - checks whether RequestContext is done with it's activity
-func (rc *RequestContext) IsDone() bool {
-	rc.doneMu.Lock()
-	defer rc.doneMu.Unlock()
-	return rc.done
+func (m *Multiplexer) IsDone() bool {
+	m.doneMu.Lock()
+	defer m.doneMu.Unlock()
+	return m.done
 }
 
 // GetErrors - retrieves final error message
-func (rc *RequestContext) GetErrors() []error {
-	rc.errorMu.Lock()
-	defer rc.errorMu.Unlock()
-	return rc.errors
+func (m *Multiplexer) GetErrors() []error {
+	m.errorMu.Lock()
+	defer m.errorMu.Unlock()
+	return m.errors
 }
 
 // GetErrorsCount - Get a count of errors that have occured in the multiplexer
-func (rc *RequestContext) GetErrorsCount() int {
-	rc.errorMu.Lock()
-	defer rc.errorMu.Unlock()
-	return len(rc.errors)
+func (m *Multiplexer) GetErrorsCount() int {
+	m.errorMu.Lock()
+	defer m.errorMu.Unlock()
+	return len(m.errors)
 }
 
-func (rc *RequestContext) addError(err error) {
-	rc.errorMu.Lock()
-	defer rc.errorMu.Unlock()
-	rc.errors = append(rc.errors, err)
+func (m *Multiplexer) addError(err error) {
+	m.errorMu.Lock()
+	defer m.errorMu.Unlock()
+	m.errors = append(m.errors, err)
 }
 
 // SafeClose - Safely close all the channels
-func (rc *RequestContext) SafeClose() {
-	rc.once.Do(func() {
-		close(rc.responseCh)
-		close(rc.FirstResponse)
-		close(rc.errorCh)
-		rc.canelContext()
-		rc.logger.Printf("Request context [%d] in now closed", rc.session)
+func (m *Multiplexer) SafeClose() {
+	m.once.Do(func() {
+		close(m.responseCh)
+		close(m.FirstResponse)
+		close(m.errorCh)
+		m.canelContext()
+		m.logger.Printf("Request context [%d] in now closed", m.session)
 	})
 
 	// PrintMemUsage()
 }
 
 // GetElapsedTime - get time elapsed since the processing started
-func (rc *RequestContext) GetElapsedTime() time.Duration {
-	return time.Now().UTC().Sub(rc.startedAt)
+func (m *Multiplexer) GetElapsedTime() time.Duration {
+	return time.Now().UTC().Sub(m.startedAt)
 }
 
-func (rc *RequestContext) createRequest() *http.Request {
-	req, _ := http.NewRequest(rc.resolveMethod(), rc.resolveURL(), nil)
+func (m *Multiplexer) createRequest() *http.Request {
+	req, _ := http.NewRequest(m.resolveMethod(), m.resolveURL(), nil)
 
 	// dump the request to the console
 	dump, _ := httputil.DumpRequest(req, false)
 	fmt.Println(string(dump))
 
-	return req.WithContext(rc.context)
+	return req.WithContext(m.context)
 }
 
-func (rc *RequestContext) multiplexer(index int) {
+func (m *Multiplexer) multiplex(index int) {
 	defer func() {
-		rc.logger.Printf("\nClient request [%d:%d] exiting...", rc.session, index)
+		m.logger.Printf("\nClient request [%d:%d] exiting...", m.session, index)
 		// just in case something goes wrong
 		if r := recover(); r != nil {
-			rc.logger.Printf("\nError! Recovered from %v", r)
+			m.logger.Printf("\nError! Recovered from %v", r)
 		}
 	}()
 
-	req := rc.createRequest()
+	// create a new request
+	req := m.createRequest()
 
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				rc.logger.Printf("\nError! Recovered from %v", r)
+				m.logger.Printf("\nError! Recovered from %v", r)
 			}
 		}()
 
 		// make a query
-		response, err := rc.client.Do(req)
+		response, err := m.client.Do(req)
 		if err != nil {
 			// we don't want to register an error when context has timed out
-			// for any timout logic there is a specialized handler
+			// for any timout error there is a specialized handler
 			if strings.Contains(err.Error(), "context") || strings.Contains(err.Error(), "canceled") {
-				rc.logger.Printf("\nRequest to %s within session [%d] got cancelled", req.URL, rc.session)
+				m.logger.Printf("\nRequest to %s within session [%d] got cancelled", req.URL, m.session)
 			} else {
-				rc.errorOccurred(
+				// will save error in errors list
+				m.errorOccurred(
 					fmt.Errorf("\nRequest to %s failed with error [%s]", req.URL, err.Error()))
 			}
 
@@ -214,18 +214,18 @@ func (rc *RequestContext) multiplexer(index int) {
 
 		// check if response is one of 2**
 		if response.StatusCode >= 200 && response.StatusCode < 300 {
-			if !rc.IsDone() {
-				rc.responseCh <- response
+			if !m.IsDone() {
+				m.responseCh <- response
 				return
 			}
-			rc.logger.Printf("\nResponse to request to %s already received", req.URL)
+			m.logger.Printf("\nResponse to request to %s already received", req.URL)
 		} else {
-			rc.errorOccurred(
+			m.errorOccurred(
 				fmt.Errorf(
 					"\nError status %d received from %s on session [%d]",
 					response.StatusCode,
 					req.URL,
-					rc.session))
+					m.session))
 		}
 
 		// close response body of any response that was not passed to the channel
@@ -233,51 +233,53 @@ func (rc *RequestContext) multiplexer(index int) {
 	}()
 
 	select {
-	case <-rc.doneCh:
-		rc.logger.Printf("Multiplexer on session [%d] is done. Cancelling remaining requests", rc.session)
-		rc.transport.CancelRequest(req)
+	case <-m.doneCh:
+		m.logger.Printf("\nMultiplexer on session [%d] is done. Cancelling remaining requests", m.session)
+		m.transport.CancelRequest(req)
 		return
-	case <-rc.context.Done():
-		rc.logger.Printf("Context on session [%d] was cancelled. Cancelling remaining requests", rc.session)
-		rc.transport.CancelRequest(req)
+	case <-m.context.Done():
+		m.logger.Printf("\nContext on session [%d] was cancelled. Cancelling remaining requests", m.session)
+		m.transport.CancelRequest(req)
 		return
 	}
 }
 
-func (rc *RequestContext) errorOccurred(err error) {
-	rc.logger.Println(err)
-	rc.errorCh <- err
+func (m *Multiplexer) errorOccurred(err error) {
+	m.logger.Println(err)
+	m.errorCh <- err
 }
 
-func (rc *RequestContext) resolveURL() string {
-	return rc.originalRequest.URL.String()
+func (m *Multiplexer) resolveURL() string {
+	query := m.originalRequest.URL.Query()
+	m.logger.Println(query["url"][0])
+	return query["url"][0]
 }
 
-func (rc *RequestContext) resolveMethod() string {
-	return rc.originalRequest.Method
+func (m *Multiplexer) resolveMethod() string {
+	return m.originalRequest.Method
 }
 
-// NewRequestContext - create new request context
-func NewRequestContext(originalRequest *http.Request, logger *log.Logger, session int64) (*RequestContext, error) {
+// NewMultiplexer - create new request context
+func NewMultiplexer(originalRequest *http.Request, logger Logger, session int64) (*Multiplexer, error) {
 	// it is better to initialize proxy here, so that
 	// if env variables change service does not have to get restarted
-	proxyURL, err := url.Parse(getProxyStr())
-	if err != nil {
-		return nil, err
-	}
+	// proxyURL, err := url.Parse(getProxyStr())
+	// if err != nil {
+	// 	return nil, err
+	// }
 
 	tlsClientSkipVerify := &tls.Config{InsecureSkipVerify: true}
 
-	timeout := time.Duration(getMaxTimeout()) * time.Second
+	timeout := time.Duration(GetMaxTimeout()) * time.Second
 	//create and prepare the transport
 	transport := &http.Transport{TLSClientConfig: tlsClientSkipVerify}
-	transport.Proxy = http.ProxyURL(proxyURL)
-	ctx, cancel := context.WithTimeout(originalRequest.Context(), timeout)
+	// transport.Proxy = http.ProxyURL(proxyURL)
+	ctx, cancel := context.WithCancel(originalRequest.Context())
 
 	// how many concurrent requests should be sent to destination URL
 	cuncurrentTries := getConcurrentTries()
 
-	return &RequestContext{
+	return &Multiplexer{
 		FirstResponse:   make(chan *FirstResponse),
 		originalRequest: originalRequest,
 		context:         ctx,
