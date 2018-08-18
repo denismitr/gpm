@@ -52,7 +52,8 @@ func getConcurrentTries() int {
 	return concurrentTries
 }
 
-func getMaxTimeout() int {
+// GetMaxTimeout - get maximum timeout from env
+func GetMaxTimeout() int {
 	maxTimeout, err := strconv.Atoi(os.Getenv("GPM_MAX_TIMEOUT"))
 	if err != nil {
 		maxTimeout = 10 // seconds

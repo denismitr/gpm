@@ -1,9 +1,9 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"sync/atomic"
 )
@@ -12,83 +12,84 @@ import (
 // incoming HTTP request to querying the proxied url,
 // copying body and headers of the first response to the ResponseWriter
 type Server struct {
-	Logger *log.Logger
+	logger Logger
 
 	// stores unique session number
 	session int64
 }
 
-// ServeHTTP - handle HTTP request
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	defer func() {
-		s.Logger.Printf("\nServe HTTP exiting session [%d]...", s.session)
-		if r := recover(); r != nil {
-			msg := fmt.Sprintf("Error occurred during Serve HTTP! Recovered from %v", r)
-			s.Logger.Println(msg)
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("\r\n" + msg))
+type contextKey string
+
+func (c contextKey) String() string {
+	return "proxy context key " + string(c)
+}
+
+var (
+	responseKey = contextKey("response")
+	sessionKey  = contextKey("session")
+)
+
+// ProxyGET - middleware that will perform multiplexing
+// and will place response object in to the context
+func (s *Server) ProxyGetRequest(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			s.logger.Printf("\nMultiplexer GET middleware exiting session [%d]...", s.session)
+			if rec := recover(); rec != nil {
+				msg := fmt.Sprintf("Internal server error occurred. Recovered from %v", rec)
+				http.Error(w, msg, http.StatusInternalServerError)
+			}
+		}()
+
+		// create new context
+		requestContext, err := NewMultiplexer(r, s.logger, atomic.AddInt64(&s.session, 1))
+		if err != nil {
+			s.logger.Println(err)
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
 		}
 
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("\r\nBad gateway"))
+		// process the request and get the first good response
+		// if one actually arrives
+		go requestContext.processRequest()
+
+		response := <-requestContext.FirstResponse
+
+		s.logger.Printf("Done. Response for session %d received.", s.session)
+
+		ctx := context.WithValue(r.Context(), responseKey, response)
+		next.ServeHTTP(w, r.WithContext(ctx))
+
+		requestContext.SafeClose()
+	})
+}
+
+// ProxyGetResponse - handle HTTP GET request
+func (s *Server) ProxyGetResponse(w http.ResponseWriter, r *http.Request) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			msg := fmt.Sprintf("Internal error occurred. Recovered from %v", rec)
+			http.Error(w, msg, http.StatusBadGateway)
+		}
 	}()
 
-	s.Logger.Printf("Headers: %v\n", r.Header)
-	s.Logger.Printf("Host: %v\n", r.Host)
-	s.Logger.Printf("Scheme: %v\n", r.URL.Scheme)
-	s.Logger.Printf("Protocol: %v\n", r.Proto)
-	s.Logger.Printf("Method: %v\n", r.Method)
-	s.Logger.Printf("Remote ADDR: %v\n", r.RemoteAddr)
-	s.Logger.Printf("Referer: %v\n", r.Referer())
-	s.Logger.Printf("Request Cookies: %v\n", r.Cookies())
-	s.Logger.Printf("URL: %v\n", r.URL.String())
-	s.Logger.Printf("Request URI: %v\n", r.URL.RequestURI())
-	s.Logger.Printf("Query: %v\n", r.URL.Query())
-	s.Logger.Printf("Path: %v\n", r.URL.Path)
-	s.Logger.Printf("Body: %v\n", r.Body)
-
-	if r.Method == "CONNECT" {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("\r\nPlease don't use https"))
+	ctx := r.Context()
+	response, ok := ctx.Value(responseKey).(*FirstResponse)
+	if !ok {
+		http.Error(w, "Multiplexer failed to deliver any response", 502)
 		return
 	}
-
-	// create new context
-	requestContext, err := NewRequestContext(r, s.Logger, atomic.AddInt64(&s.session, 1))
-	if err != nil {
-		s.Logger.Println(err)
-		// return bad gateway if no valid response arrived
-		// @TODO maybe use some other format and/or status code
-		w.WriteHeader(http.StatusBadGateway)
-		w.Write([]byte("\r\nBad gateway"))
-		return
-	}
-
-	// process the request and get the first good response
-	// if one actually arrives
-	go requestContext.processRequest()
-
-	response := <-requestContext.FirstResponse
 
 	// check if response is valid
 	if !response.IsValid() {
-		s.Logger.Println(response.GetError())
-		// return bad gateway if no valid response arrived
-		// @TODO maybe use some other format and/or status code
-		w.WriteHeader(http.StatusBadGateway)
-		w.Write([]byte("\r\n" + response.GetError().Error()))
+		s.logger.Println(response.GetError())
+		http.Error(w, response.GetError().Error(), http.StatusBadGateway)
 		return
 	}
 
-	s.Logger.Printf(
-		"Sending success response from session %d after %.3f seconds of processing", s.session, response.GetElapsedSeconds())
-
-	// copy response with headers to ResponseWriter
 	s.proxyResponse(w, response)
-	requestContext.SafeClose()
 
-	s.Logger.Printf(
-		"Done. Response delivered. Session [%d] is now closed...", s.session)
+	s.logger.Printf("Done.")
 }
 
 // proxyResponse - copies the client's first response body and header into
@@ -103,16 +104,16 @@ func (s *Server) proxyResponse(w http.ResponseWriter, response *FirstResponse) {
 	bytesCopied, _ := io.Copy(w, response.GetBody())
 	// close body
 	if err := response.CloseBody(); err != nil {
-		s.Logger.Printf("Can't close response body %v", err)
+		s.logger.Printf("Can't close response body %v", err)
 	}
 
-	s.Logger.Printf("Copied %v bytes to the client", bytesCopied)
+	s.logger.Printf("Copied %v bytes to the client", bytesCopied)
 }
 
 // NewServer - creates a new proxy server
-func NewServer(logger *log.Logger) *Server {
+func NewServer(logger Logger) *Server {
 	server := Server{
-		Logger: logger,
+		logger: logger,
 	}
 
 	return &server
