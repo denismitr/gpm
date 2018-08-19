@@ -96,14 +96,14 @@ func TestProxyGetRequest(t *testing.T) {
 
 		r.Use(server.ProxyGetRequest)
 
-		r.Get("/get", testErrorHandler(t, r, server, errors.New("error status 500 received from https://httpbin.org/status/500")))
+		r.Get("/get", testErrorHandler(t, r, server, errors.New("error status 500 received from http://httpbin.org/status/500")))
 
 		ts := httptest.NewServer(r)
 		defer ts.Close()
 
 		_, body := testRequest(t, ts, "GET", "/get?url=https://httpbin.org/status/500", nil)
 
-		if !strings.Contains(string(body), "error status 500 received from https://httpbin.org/status/500") {
+		if !strings.Contains(string(body), "error status 500 received from http://httpbin.org/status/500") {
 			t.Fatalf("Expected valid error string, got %v", body)
 		}
 	})

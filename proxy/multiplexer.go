@@ -271,6 +271,10 @@ func (m *Multiplexer) errorOccurred(err error) {
 
 // NewMultiplexer - create new request context
 func NewMultiplexer(originalRequest *http.Request, method string, destinationURL string, logger Logger, session int64) (*Multiplexer, error) {
+	// how many concurrent requests should be sent to destination URL
+	cuncurrentTries := getConcurrentTries()
+	timeout := time.Duration(GetMaxTimeout()) * time.Second
+
 	// it is better to initialize proxy here, so that
 	// if env variables change service does not have to get restarted
 	proxyStr := getProxyStr()
@@ -279,12 +283,8 @@ func NewMultiplexer(originalRequest *http.Request, method string, destinationURL
 		logger.Print(err)
 		proxyURL = nil
 	} else {
-		logger.Printf("Creating multiplexer with proxy %s", proxyStr)
+		logger.Printf("Creating multiplexer with proxy %s and %d concurrent tries", proxyStr, cuncurrentTries)
 	}
-
-	// how many concurrent requests should be sent to destination URL
-	cuncurrentTries := getConcurrentTries()
-	timeout := time.Duration(GetMaxTimeout()) * time.Second
 
 	//create and prepare the transport
 	tlsClientSkipVerify := &tls.Config{InsecureSkipVerify: true}

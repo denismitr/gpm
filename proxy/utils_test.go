@@ -24,9 +24,9 @@ func TestURLArgumentParser(t *testing.T) {
 		result string
 	}{
 		{"url=" + uriEncode("http://google.com"), "http://google.com"},
-		{"url=" + uriEncode("https://google.com?search=boo"), "https://google.com?search=boo"},
-		{"api_key=secret&url=" + uriEncode("https://google.com?search=boo&cache=bust"), "https://google.com?search=boo&cache=bust"},
-		{"api_key=secret&url=" + base64encode("https://google.com?search=boo&cache=bust"), "https://google.com?search=boo&cache=bust"},
+		{"url=" + uriEncode("https://google.com?search=boo"), "http://google.com?search=boo"},
+		{"api_key=secret&url=" + uriEncode("https://google.com?search=boo&cache=bust"), "http://google.com?search=boo&cache=bust"},
+		{"api_key=secret&url=" + base64encode("https://google.com?search=boo&cache=bust"), "http://google.com?search=boo&cache=bust"},
 	}
 
 	for _, v := range invalid {

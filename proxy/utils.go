@@ -90,7 +90,9 @@ func ParseURLParam(r *http.Request) (string, error) {
 		return "", errors.New("passed url value does not match a valid url pattern")
 	}
 
-	return u, nil
+	// for some reason crawlera does not like https
+	// or I'm doing something wrong
+	return strings.Replace(u, "https://", "http://", 1), nil
 }
 
 // ExtractQueryParam - extract query param from request query
