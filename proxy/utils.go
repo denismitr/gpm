@@ -26,7 +26,7 @@ func copyHeaders(dest, src http.Header) {
 func getProxyStr() string {
 	proxyURL := os.Getenv("GPM_PROXY_URL")
 	if proxyURL == "" {
-		proxyURL = "http://103.15.60.23:8080" // default proxy
+		return ""
 	}
 
 	proxyURL = strings.Replace(proxyURL, "http://", "", 1)

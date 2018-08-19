@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -272,21 +273,26 @@ func (m *Multiplexer) errorOccurred(err error) {
 func NewMultiplexer(originalRequest *http.Request, method string, destinationURL string, logger Logger, session int64) (*Multiplexer, error) {
 	// it is better to initialize proxy here, so that
 	// if env variables change service does not have to get restarted
-	// proxyURL, err := url.Parse(getProxyStr())
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	tlsClientSkipVerify := &tls.Config{InsecureSkipVerify: true}
-
-	timeout := time.Duration(GetMaxTimeout()) * time.Second
-	//create and prepare the transport
-	transport := &http.Transport{TLSClientConfig: tlsClientSkipVerify}
-	// transport.Proxy = http.ProxyURL(proxyURL)
-	ctx, cancel := context.WithCancel(originalRequest.Context())
+	proxyStr := getProxyStr()
+	proxyURL, err := url.Parse(proxyStr)
+	if err != nil || proxyStr == "" {
+		logger.Print(err)
+		proxyURL = nil
+	}
 
 	// how many concurrent requests should be sent to destination URL
 	cuncurrentTries := getConcurrentTries()
+	timeout := time.Duration(GetMaxTimeout()) * time.Second
+
+	//create and prepare the transport
+	tlsClientSkipVerify := &tls.Config{InsecureSkipVerify: true}
+	transport := &http.Transport{TLSClientConfig: tlsClientSkipVerify}
+	if proxyURL != nil {
+		transport.Proxy = http.ProxyURL(proxyURL)
+	}
+
+	// get context from the original request
+	ctx, cancel := context.WithCancel(originalRequest.Context())
 
 	return &Multiplexer{
 		FirstResponse:   make(chan *FirstResponse),
