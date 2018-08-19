@@ -4,6 +4,10 @@ The proxy will now work as an api receiving requests in format
 
 ### Environment variables required for the proxy server to work
 * `GPM_SERVER_API_KEY` - security api key
+* `GPM_PROXY_URL` - third party proxy service url
+* `GPM_PROXY_AUTH` -  third party proxy service auth token
+* `GPM_CONCURRENT_TRIES` - how many concurrent request through proxy service is going to be made concurrently
+* `GPM_MAX_TIMEOUT` - maximum timeout after which an error response ig going to be send
 
 ### Usage (this functionality is temporarily disabled)
 Run `main.go` in a console, then in another console use curl like in below examples.
