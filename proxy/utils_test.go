@@ -3,6 +3,7 @@ package proxy
 import (
 	"encoding/base64"
 	"net/http"
+	"net/url"
 	"testing"
 )
 
@@ -11,10 +12,10 @@ func TestURLArgumentParser(t *testing.T) {
 		url string
 		msg string
 	}{
-		{"url=" + base64encode("http//google.com"), "Passed url value does not match a valid url pattern"},
+		{"url=" + uriEncode("http//google.com"), "Passed url value does not match a valid url pattern"},
 		{"url=google", "Passed url value does not match a valid url pattern"},
 		{"", "No [url] query param found"},
-		{"url=" + base64encode("/foo/bar"), "Passed url value does not match a valid url pattern"},
+		{"url=" + uriEncode("/foo/bar"), "Passed url value does not match a valid url pattern"},
 		{"url=", "[url] query param is empty"},
 	}
 
@@ -22,8 +23,9 @@ func TestURLArgumentParser(t *testing.T) {
 		url    string
 		result string
 	}{
-		{"url=" + base64encode("http://google.com"), "http://google.com"},
-		{"url=" + base64encode("https://google.com?search=boo"), "https://google.com?search=boo"},
+		{"url=" + uriEncode("http://google.com"), "http://google.com"},
+		{"url=" + uriEncode("https://google.com?search=boo"), "https://google.com?search=boo"},
+		{"api_key=secret&url=" + uriEncode("https://google.com?search=boo&cache=bust"), "https://google.com?search=boo&cache=bust"},
 		{"api_key=secret&url=" + base64encode("https://google.com?search=boo&cache=bust"), "https://google.com?search=boo&cache=bust"},
 	}
 
@@ -60,4 +62,8 @@ func TestURLArgumentParser(t *testing.T) {
 
 func base64encode(in string) string {
 	return base64.StdEncoding.EncodeToString([]byte(in))
+}
+
+func uriEncode(in string) string {
+	return url.QueryEscape(in)
 }

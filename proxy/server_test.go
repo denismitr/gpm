@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"io/ioutil"
@@ -30,8 +31,6 @@ const testHTML = `<!DOCTYPE html>
   </body>
 </html>`
 
-var testBody = []byte(testHTML)
-
 func TestProxyGetRequest(t *testing.T) {
 	t.Parallel()
 
@@ -43,12 +42,42 @@ func TestProxyGetRequest(t *testing.T) {
 
 		r.Use(server.ProxyGetRequest)
 
+		testBody := []byte(testHTML)
+
 		r.Get("/get", testHandler(t, r, server, testBody))
 
 		ts := httptest.NewServer(r)
 		defer ts.Close()
 
 		_, body := testRequest(t, ts, "GET", "/get?url=https://httpbin.org/html", nil)
+		if reflect.DeepEqual(body, testBody) {
+			t.Fatalf("Expected test body, got %v", body)
+		}
+	})
+
+	t.Run("json response", func(t *testing.T) {
+		r := chi.NewRouter()
+
+		logger := log.New(os.Stdout, "", log.LstdFlags)
+		server := NewServer(logger)
+
+		r.Use(server.ProxyGetRequest)
+
+		data, err := ioutil.ReadFile("../testdata/response_1534688291588.json")
+		if err != nil {
+			t.Fatalf("Could not read test data from response_1534688291588.json")
+		}
+
+		testBody := []byte(data)
+
+		r.Get("/get", testJSONHandler(t, r, server, testBody))
+
+		ts := httptest.NewServer(r)
+		defer ts.Close()
+
+		uri := "/get?url=" + uriEncode("https://httpbin.org/json")
+
+		_, body := testRequest(t, ts, "GET", uri, nil)
 		if reflect.DeepEqual(body, testBody) {
 			t.Fatalf("Expected test body, got %v", body)
 		}
@@ -133,12 +162,33 @@ func testHandler(t *testing.T, r *chi.Mux, s *Server, expectedBody []byte) http.
 		body, _ := ioutil.ReadAll(response.GetBody())
 
 		if len(body) != len(expectedBody) {
-			t.Errorf("Expected response body to have length of %d instead got %d", len(testBody), len(body))
+			t.Errorf("Expected response body to have length of %d instead got %d", len(expectedBody), len(body))
 		}
 
-		if string(body) != string(expectedBody) {
-			t.Errorf("Expected to see test body %s but got %s", string(testBody), string(body))
+		if !reflect.DeepEqual(body, expectedBody) {
+			t.Errorf("Expected to see test body %s but got %s", string(expectedBody), string(body))
 		}
+
+		s.proxyResponse(w, response)
+	}
+}
+
+func testJSONHandler(t *testing.T, r *chi.Mux, s *Server, expectedJSON []byte) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		response, ok := r.Context().Value(responseKey).(*FirstResponse)
+		if !ok {
+			t.Fatal("Could not find responseKey in request")
+		}
+
+		if response.IsValid() != true {
+			t.Fatalf("Expected response to be valid but it is not")
+		}
+
+		defer response.CloseBody()
+
+		body, _ := ioutil.ReadAll(response.GetBody())
+
+		assertExactJSON(t, expectedJSON, body)
 
 		s.proxyResponse(w, response)
 	}
@@ -165,4 +215,23 @@ func testRequest(t *testing.T, ts *httptest.Server, method, path string, body io
 	defer resp.Body.Close()
 
 	return resp, string(respBody)
+}
+
+func assertExactJSON(t *testing.T, json1, json2 []byte) {
+	var o1 interface{}
+	var o2 interface{}
+
+	var err error
+	err = json.Unmarshal(json1, &o1)
+	if err != nil {
+		t.Fatalf("Error mashalling string 1 :: %s", err.Error())
+	}
+	err = json.Unmarshal(json2, &o2)
+	if err != nil {
+		t.Fatalf("Error mashalling string 2 :: %s", err.Error())
+	}
+
+	if !reflect.DeepEqual(o1, o2) {
+		t.Fatalf("Failed asserting that two json structures are equal %v != %v", json1, json2)
+	}
 }
