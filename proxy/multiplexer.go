@@ -87,13 +87,9 @@ func (m *Multiplexer) processRequest() {
 		case newErr := <-m.errorCh:
 			m.addError(newErr)
 
-			if m.GetErrorsCount() >= m.concurrentTries {
+			if m.AllErrored() {
 				m.finish()
-				m.FirstResponse <- NewInvalidFirstResponse(
-					fmt.Errorf("all %d requests on session [%d] failed with errors", m.concurrentTries, m.session),
-					false,
-					m.GetElapsedTime())
-
+				m.FirstResponse <- NewInvalidFirstResponse(m.GetAvgError(), false, m.GetElapsedTime())
 				return
 			}
 		case <-m.timeoutCh:
@@ -134,6 +130,27 @@ func (m *Multiplexer) GetErrors() []error {
 	m.errorMu.Lock()
 	defer m.errorMu.Unlock()
 	return m.errors
+}
+
+// AllErrored - checks if all requests have failed
+func (m *Multiplexer) AllErrored() bool {
+	return m.GetErrorsCount() >= m.concurrentTries
+}
+
+func (m *Multiplexer) GetAvgError() error {
+	if m.AllErrored() {
+		for _, err := range m.errors {
+			for _, anotherErr := range m.errors {
+				if err.Error() != anotherErr.Error() {
+					return fmt.Errorf("all requests to %s have failed.", m.resolveURL())
+				}
+			}
+		}
+
+		return m.errors[0]
+	}
+
+	return nil
 }
 
 // GetErrorsCount - Get a count of errors that have occured in the multiplexer
@@ -220,12 +237,7 @@ func (m *Multiplexer) multiplex(index int) {
 			}
 			m.logger.Printf("\nResponse to request to %s already received", req.URL)
 		} else {
-			m.errorOccurred(
-				fmt.Errorf(
-					"\nError status %d received from %s on session [%d]",
-					response.StatusCode,
-					req.URL,
-					m.session))
+			m.errorOccurred(fmt.Errorf("error status %d received from %s", response.StatusCode, req.URL))
 		}
 
 		// close response body of any response that was not passed to the channel

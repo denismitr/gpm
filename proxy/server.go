@@ -35,6 +35,7 @@ func (s *Server) ProxyGetRequest(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			s.logger.Printf("\nMultiplexer GET middleware exiting session [%d]...", s.session)
+
 			if rec := recover(); rec != nil {
 				msg := fmt.Sprintf("Internal server error occurred. Recovered from %v", rec)
 				http.Error(w, msg, http.StatusInternalServerError)
@@ -79,6 +80,12 @@ func (s *Server) ProxyGetResponse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.proxyResponse(w, response)
+}
+
+// proxyResponse - copies the client's first response body and header into
+// ResponseWriter object
+func (s *Server) proxyResponse(w http.ResponseWriter, response *FirstResponse) {
 	// check if response is valid
 	if !response.IsValid() {
 		s.logger.Println(response.GetError())
@@ -86,14 +93,6 @@ func (s *Server) ProxyGetResponse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.proxyResponse(w, response)
-
-	s.logger.Printf("Done.")
-}
-
-// proxyResponse - copies the client's first response body and header into
-// ResponseWriter object
-func (s *Server) proxyResponse(w http.ResponseWriter, response *FirstResponse) {
 	// copy all the headers
 	copyHeaders(w.Header(), response.GetHeader())
 	// copy status code
@@ -106,7 +105,7 @@ func (s *Server) proxyResponse(w http.ResponseWriter, response *FirstResponse) {
 		s.logger.Printf("Can't close response body %v", err)
 	}
 
-	s.logger.Printf("Copied %v bytes to the client", bytesCopied)
+	s.logger.Printf("Copied %v bytes to the client. All done.", bytesCopied)
 }
 
 // NewServer - creates a new proxy server

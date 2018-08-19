@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"errors"
 	"io"
 	"io/ioutil"
 	"log"
@@ -8,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi"
@@ -31,40 +33,92 @@ const testHTML = `<!DOCTYPE html>
 var testBody = []byte(testHTML)
 
 func TestProxyGetRequest(t *testing.T) {
-	r := chi.NewRouter()
+	t.Parallel()
 
-	logger := log.New(os.Stdout, "", log.LstdFlags)
-	server := NewServer(logger)
+	t.Run("html 200 response", func(t *testing.T) {
+		r := chi.NewRouter()
 
-	r.Use(server.ProxyGetRequest)
+		logger := log.New(os.Stdout, "", log.LstdFlags)
+		server := NewServer(logger)
 
-	r.Get("/get", func(w http.ResponseWriter, r *http.Request) {
+		r.Use(server.ProxyGetRequest)
+
+		r.Get("/get", testHandler(t, r, server, testBody))
+
+		ts := httptest.NewServer(r)
+		defer ts.Close()
+
+		_, body := testRequest(t, ts, "GET", "/get?url=https://httpbin.org/html", nil)
+		if reflect.DeepEqual(body, testBody) {
+			t.Fatalf("Expected test body, got %v", body)
+		}
+	})
+
+	t.Run("500 response", func(t *testing.T) {
+		// Given
+		r := chi.NewRouter()
+
+		logger := log.New(os.Stdout, "", log.LstdFlags)
+		server := NewServer(logger)
+
+		r.Use(server.ProxyGetRequest)
+
+		r.Get("/get", testErrorHandler(t, r, server, errors.New("error status 500 received from https://httpbin.org/status/500")))
+
+		ts := httptest.NewServer(r)
+		defer ts.Close()
+
+		_, body := testRequest(t, ts, "GET", "/get?url=https://httpbin.org/status/500", nil)
+
+		if !strings.Contains(string(body), "error status 500 received from https://httpbin.org/status/500") {
+			t.Fatalf("Expected valid error string, got %v", body)
+		}
+	})
+}
+
+func testErrorHandler(t *testing.T, r *chi.Mux, s *Server, expectedError error) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		response, ok := r.Context().Value(responseKey).(*FirstResponse)
 		if !ok {
 			t.Fatal("Could not find responseKey in request")
+		}
+
+		if response.IsValid() != false {
+			t.Fatal("Expected response to be invalid but it is the opposite")
+		}
+
+		if response.GetError().Error() != expectedError.Error() {
+			t.Fatalf("Expected error to be %v but got %v", expectedError, response.GetError())
+		}
+
+		s.proxyResponse(w, response)
+	}
+}
+
+func testHandler(t *testing.T, r *chi.Mux, s *Server, expectedBody []byte) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		response, ok := r.Context().Value(responseKey).(*FirstResponse)
+		if !ok {
+			t.Fatal("Could not find responseKey in request")
+		}
+
+		if response.IsValid() != true {
+			t.Fatalf("Expected response to be valid but it is not")
 		}
 
 		defer response.CloseBody()
 
 		body, _ := ioutil.ReadAll(response.GetBody())
 
-		if len(body) != len(testBody) {
+		if len(body) != len(expectedBody) {
 			t.Errorf("Expected response body to have length of %d instead got %d", len(testBody), len(body))
 		}
 
-		if string(body) != string(testBody) {
+		if string(body) != string(expectedBody) {
 			t.Errorf("Expected to see test body %s but got %s", string(testBody), string(body))
 		}
 
-		server.proxyResponse(w, response)
-	})
-
-	ts := httptest.NewServer(r)
-	defer ts.Close()
-
-	_, body := testRequest(t, ts, "GET", "/get?url=https://httpbin.org/html", nil)
-	if reflect.DeepEqual(body, testBody) {
-		t.Fatalf("Expected test body, got %v", body)
+		s.proxyResponse(w, response)
 	}
 }
 
