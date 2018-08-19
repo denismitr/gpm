@@ -23,6 +23,8 @@ func copyHeaders(dest, src http.Header) {
 	}
 }
 
+// getProxyStr - combines proxy url with auth key
+// primarily because it works with crawlera
 func getProxyStr() string {
 	proxyURL := os.Getenv("GPM_PROXY_URL")
 	if proxyURL == "" {
