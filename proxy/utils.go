@@ -1,7 +1,7 @@
 package proxy
 
 import (
-	"errors"
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"os"
@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"github.com/pkg/errors"
 )
 
 func copyHeaders(dest, src http.Header) {
@@ -78,7 +80,14 @@ func ParseURLArgument(r *http.Request) (string, error) {
 		return "", errors.New("[url] query param is empty")
 	}
 
-	u := list[0]
+	var u string
+
+	decoded, err := base64.StdEncoding.DecodeString(list[0])
+	if err != nil {
+		u = list[0]
+	} else {
+		u = string(decoded)
+	}
 
 	regx := regexp.MustCompile(`^(?:http(s)?:\/\/)?[\w.-]+(?:\.[\w\.-]+)+[\w\-\._~:/?#[\]@!\$&'\(\)\*\+,;=.]+$`)
 
