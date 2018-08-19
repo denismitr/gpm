@@ -2,6 +2,9 @@
 The proxy will now work as an api receiving requests in format
 `/get?url=httpsbin.org/html` and return the response body and headers
 
+### Environment variables required for the proxy server to work
+* `GPM_SERVER_API_KEY` - security api key
+
 ### Usage (this functionality is temporarily disabled)
 Run `main.go` in a console, then in another console use curl like in below examples.
 

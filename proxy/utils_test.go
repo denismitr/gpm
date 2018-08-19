@@ -12,10 +12,10 @@ func TestURLArgumentParser(t *testing.T) {
 		url string
 		msg string
 	}{
-		{"url=" + uriEncode("http//google.com"), "Passed url value does not match a valid url pattern"},
-		{"url=google", "Passed url value does not match a valid url pattern"},
-		{"", "No [url] query param found"},
-		{"url=" + uriEncode("/foo/bar"), "Passed url value does not match a valid url pattern"},
+		{"url=" + uriEncode("http//google.com"), "passed url value does not match a valid url pattern"},
+		{"url=google", "passed url value does not match a valid url pattern"},
+		{"", "no [url] query param found"},
+		{"url=" + uriEncode("/foo/bar"), "passed url value does not match a valid url pattern"},
 		{"url=", "[url] query param is empty"},
 	}
 
@@ -33,7 +33,7 @@ func TestURLArgumentParser(t *testing.T) {
 		t.Run("invalid URLs", func(t *testing.T) {
 			r, _ := http.NewRequest("GET", "http://localhost:8081/get?"+v.url, nil)
 
-			_, err := ParseURLArgument(r)
+			_, err := ParseURLParam(r)
 			if err == nil {
 				t.Fatalf("Expeced an error on url %s, but did not get one", v.url)
 			}
@@ -48,7 +48,7 @@ func TestURLArgumentParser(t *testing.T) {
 		t.Run("invalid URLs", func(t *testing.T) {
 			r, _ := http.NewRequest("GET", "http://localhost:8081/get?"+v.url, nil)
 
-			result, err := ParseURLArgument(r)
+			result, err := ParseURLParam(r)
 			if err != nil {
 				t.Fatalf("Did not expect an error but got %v", err)
 			}

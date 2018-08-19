@@ -35,7 +35,7 @@ var (
 	sessionKey  = contextKey("session")
 )
 
-// ProxyGetRequest - middleware that will perform multiplexing
+// ProxyGetRequest is a middleware that will perform multiplexing
 // and will place response object in to the context
 func (s *Server) ProxyGetRequest(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -48,7 +48,7 @@ func (s *Server) ProxyGetRequest(next http.Handler) http.Handler {
 			}
 		}()
 
-		destinationURL, err := ParseURLArgument(r)
+		destinationURL, err := ParseURLParam(r)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -75,6 +75,31 @@ func (s *Server) ProxyGetRequest(next http.Handler) http.Handler {
 
 		ctx := context.WithValue(r.Context(), responseKey, response)
 		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// CheckAPIKey is a middleware that checks if apiKey is provided and
+// that it is valid``
+func (s *Server) CheckAPIKey(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.apiKey != "" {
+			apiKey, err := ExtractQueryParam(r, "api_key")
+			if err != nil {
+				msg := fmt.Sprint("API key is missing")
+				s.logger.Println(msg)
+				http.Error(w, msg, http.StatusUnauthorized)
+				return
+			}
+
+			if s.apiKey != apiKey {
+				msg := fmt.Sprint("API key is invalid")
+				s.logger.Println(msg)
+				http.Error(w, msg, http.StatusUnauthorized)
+				return
+			}
+		}
+
+		next.ServeHTTP(w, r)
 	})
 }
 

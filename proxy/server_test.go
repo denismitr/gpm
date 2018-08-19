@@ -34,6 +34,8 @@ const testHTML = `<!DOCTYPE html>
 func TestProxyGetRequest(t *testing.T) {
 	t.Parallel()
 
+	os.Setenv("GPM_SERVER_API_KEY", "secret")
+
 	t.Run("html 200 response", func(t *testing.T) {
 		r := chi.NewRouter()
 
@@ -125,6 +127,120 @@ func TestProxyGetRequest(t *testing.T) {
 
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Fatalf("Expected bad request, got %s", resp.Status)
+		}
+	})
+
+	os.Setenv("GPM_SERVER_API_KEY", "")
+}
+
+func TestCheckAPIKey(t *testing.T) {
+	os.Setenv("GPM_SERVER_API_KEY", "secret")
+
+	t.Run("correct api key", func(t *testing.T) {
+		r := chi.NewRouter()
+
+		logger := log.New(os.Stdout, "", log.LstdFlags)
+		server := NewServer(logger)
+
+		r.Use(server.CheckAPIKey)
+
+		r.Get("/get", func(w http.ResponseWriter, r *http.Request) {})
+
+		ts := httptest.NewServer(r)
+		defer ts.Close()
+
+		resp, _ := testRequest(t, ts, "GET", "/get?api_key=secret", nil)
+
+		if resp.StatusCode == http.StatusUnauthorized {
+			t.Fatal("Received unauthorized response on correct api key")
+		}
+	})
+
+	t.Run("incorrect api key", func(t *testing.T) {
+		r := chi.NewRouter()
+
+		logger := log.New(os.Stdout, "", log.LstdFlags)
+		server := NewServer(logger)
+
+		r.Use(server.CheckAPIKey)
+
+		r.Get("/get", func(w http.ResponseWriter, r *http.Request) {
+			t.Fatalf("Should not have gotten here")
+		})
+
+		ts := httptest.NewServer(r)
+		defer ts.Close()
+
+		resp, _ := testRequest(t, ts, "GET", "/get?api_key=incorrect", nil)
+
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatal("Did not received unauthorized response on incorrect api key")
+		}
+	})
+
+	t.Run("empty api key passed", func(t *testing.T) {
+		r := chi.NewRouter()
+
+		logger := log.New(os.Stdout, "", log.LstdFlags)
+		server := NewServer(logger)
+
+		r.Use(server.CheckAPIKey)
+
+		r.Get("/get", func(w http.ResponseWriter, r *http.Request) {
+			t.Fatalf("Should not have gotten here")
+		})
+
+		ts := httptest.NewServer(r)
+		defer ts.Close()
+
+		resp, _ := testRequest(t, ts, "GET", "/get?api_key=", nil)
+
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatal("Did not received unauthorized response on incorrect api key")
+		}
+	})
+
+	t.Run("no api key passed", func(t *testing.T) {
+		r := chi.NewRouter()
+
+		logger := log.New(os.Stdout, "", log.LstdFlags)
+		server := NewServer(logger)
+
+		r.Use(server.CheckAPIKey)
+
+		r.Get("/get", func(w http.ResponseWriter, r *http.Request) {
+			t.Fatalf("Should not have gotten here")
+		})
+
+		ts := httptest.NewServer(r)
+		defer ts.Close()
+
+		resp, _ := testRequest(t, ts, "GET", "/get", nil)
+
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatal("Did not received unauthorized response on incorrect api key")
+		}
+	})
+
+	os.Setenv("GPM_SERVER_API_KEY", "")
+
+	t.Run("no api key required", func(t *testing.T) {
+		r := chi.NewRouter()
+
+		logger := log.New(os.Stdout, "", log.LstdFlags)
+		server := NewServer(logger)
+
+		r.Use(server.CheckAPIKey)
+
+		r.Get("/get", func(w http.ResponseWriter, r *http.Request) {})
+
+		ts := httptest.NewServer(r)
+		defer ts.Close()
+
+		resp, _ := testRequest(t, ts, "GET", "/get?api_key=not-required", nil)
+
+		if resp.StatusCode == http.StatusUnauthorized {
+			t.Fatal("Received unauthorized response when no api key required")
 		}
 	})
 }

@@ -68,34 +68,43 @@ func GetMaxTimeout() int {
 	return maxTimeout
 }
 
-func ParseURLArgument(r *http.Request) (string, error) {
-	query := r.URL.Query()
-
-	list, ok := query["url"]
-	if !ok {
-		return "", errors.New("No [url] query param found")
+// ParseURLParam retrieves and parse URL param from request query
+func ParseURLParam(r *http.Request) (string, error) {
+	u, err := ExtractQueryParam(r, "url")
+	if err != nil {
+		return "", err
 	}
 
-	if len(list) < 1 || list[0] == "" {
+	if u == "" {
 		return "", errors.New("[url] query param is empty")
 	}
 
-	var u string
-
-	decoded, err := base64.StdEncoding.DecodeString(list[0])
-	if err != nil {
-		u = list[0]
-	} else {
+	decoded, err := base64.StdEncoding.DecodeString(u)
+	if err == nil {
 		u = string(decoded)
 	}
 
 	regx := regexp.MustCompile(`^(?:http(s)?:\/\/)?[\w.-]+(?:\.[\w\.-]+)+[\w\-\._~:/?#[\]@!\$&'\(\)\*\+,;=.]+$`)
 
 	if !regx.MatchString(u) {
-		return "", errors.New("Passed url value does not match a valid url pattern")
+		return "", errors.New("passed url value does not match a valid url pattern")
 	}
 
 	return u, nil
+}
+
+// ExtractQueryParam - extract query param from request query
+func ExtractQueryParam(r *http.Request, key string) (string, error) {
+	if key == "" {
+		return "", fmt.Errorf("empty query param given")
+	}
+
+	keys, ok := r.URL.Query()[key]
+	if !ok || len(keys) < 1 {
+		return "", fmt.Errorf("no [%s] query param found", key)
+	}
+
+	return keys[0], nil
 }
 
 // PrintMemUsage outputs the current, total and OS memory being used. As well as the number
