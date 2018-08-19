@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sync/atomic"
 )
 
@@ -12,10 +13,15 @@ import (
 // incoming HTTP request to querying the proxied url,
 // copying body and headers of the first response to the ResponseWriter
 type Server struct {
+	// logger that implemets proxy.Logger interface
 	logger Logger
 
 	// stores unique session number
 	session int64
+
+	// API key for security
+	// should come from env
+	apiKey string
 }
 
 type contextKey string
@@ -29,7 +35,7 @@ var (
 	sessionKey  = contextKey("session")
 )
 
-// ProxyGET - middleware that will perform multiplexing
+// ProxyGetRequest - middleware that will perform multiplexing
 // and will place response object in to the context
 func (s *Server) ProxyGetRequest(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -118,8 +124,11 @@ func (s *Server) proxyResponse(w http.ResponseWriter, response *FirstResponse) {
 
 // NewServer - creates a new proxy server
 func NewServer(logger Logger) *Server {
+	apiKey := os.Getenv("GPM_SERVER_API_KEY")
+
 	server := Server{
 		logger: logger,
+		apiKey: apiKey,
 	}
 
 	return &server
