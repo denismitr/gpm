@@ -31,6 +31,9 @@ func main() {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
+	// Check API key first
+	r.Use(server.CheckAPIKey)
+
 	// Set a timeout value on the request context (ctx), that will signal
 	// through ctx.Done() that the request has timed out and all further
 	// processing should be stopped.
@@ -61,13 +64,6 @@ func main() {
 	<-stop
 
 	logger.Println("\nShutting down the server...")
-
-	// ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	// defer cancel()
-
-	// handler.Shutdown(ctx)
-
-	logger.Println("Server gracefully stopped")
 }
 
 func resolvePort() string {
