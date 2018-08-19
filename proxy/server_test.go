@@ -74,6 +74,28 @@ func TestProxyGetRequest(t *testing.T) {
 			t.Fatalf("Expected valid error string, got %v", body)
 		}
 	})
+
+	t.Run("invalid url argument", func(t *testing.T) {
+		// Given
+		r := chi.NewRouter()
+
+		logger := log.New(os.Stdout, "", log.LstdFlags)
+		server := NewServer(logger)
+
+		r.Use(server.ProxyGetRequest)
+		r.Get("/get", func(w http.ResponseWriter, r *http.Request) {
+			t.Fatal("Request should have never reached this handler")
+		})
+
+		ts := httptest.NewServer(r)
+		defer ts.Close()
+
+		resp, _ := testRequest(t, ts, "GET", "/get?url=wrong", nil)
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("Expected bad request, got %s", resp.Status)
+		}
+	})
 }
 
 func testErrorHandler(t *testing.T, r *chi.Mux, s *Server, expectedError error) http.HandlerFunc {

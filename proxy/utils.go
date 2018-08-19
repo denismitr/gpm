@@ -1,9 +1,11 @@
 package proxy
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -62,6 +64,29 @@ func GetMaxTimeout() int {
 	}
 
 	return maxTimeout
+}
+
+func ParseURLArgument(r *http.Request) (string, error) {
+	query := r.URL.Query()
+
+	list, ok := query["url"]
+	if !ok {
+		return "", errors.New("No [url] query param found")
+	}
+
+	if len(list) < 1 || list[0] == "" {
+		return "", errors.New("[url] query param is empty")
+	}
+
+	u := list[0]
+
+	regx := regexp.MustCompile(`^(?:http(s)?:\/\/)?[\w.-]+(?:\.[\w\.-]+)+[\w\-\._~:/?#[\]@!\$&'\(\)\*\+,;=.]+$`)
+
+	if !regx.MatchString(u) {
+		return "", errors.New("Passed url value does not match a valid url pattern")
+	}
+
+	return u, nil
 }
 
 // PrintMemUsage outputs the current, total and OS memory being used. As well as the number

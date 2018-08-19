@@ -42,6 +42,12 @@ func (s *Server) ProxyGetRequest(next http.Handler) http.Handler {
 			}
 		}()
 
+		_, err := ParseURLArgument(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
 		// create new context
 		requestContext, err := NewMultiplexer(r, s.logger, atomic.AddInt64(&s.session, 1))
 		if err != nil {
