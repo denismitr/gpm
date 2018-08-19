@@ -16,6 +16,11 @@ type Multiplexer struct {
 	// holds original request that came from the end user
 	originalRequest *http.Request
 
+	// URL that should be requested
+	destinationURL string
+	// HTTP Method that should be used
+	method string
+
 	// channel for passing the first response from the multiple requests
 	FirstResponse chan *FirstResponse
 	// a buffered response channel with the capacity of max concurrent tries
@@ -137,12 +142,14 @@ func (m *Multiplexer) AllErrored() bool {
 	return m.GetErrorsCount() >= m.concurrentTries
 }
 
+// GetAvgError get an error that was mostly or excludively encountered during requests
+// otherwise just return that all requests failed
 func (m *Multiplexer) GetAvgError() error {
 	if m.AllErrored() {
 		for _, err := range m.errors {
 			for _, anotherErr := range m.errors {
 				if err.Error() != anotherErr.Error() {
-					return fmt.Errorf("all requests to %s have failed.", m.resolveURL())
+					return fmt.Errorf("all requests to %s have failed", m.destinationURL)
 				}
 			}
 		}
@@ -150,7 +157,7 @@ func (m *Multiplexer) GetAvgError() error {
 		return m.errors[0]
 	}
 
-	return nil
+	return fmt.Errorf("all requests to %s have failed", m.destinationURL)
 }
 
 // GetErrorsCount - Get a count of errors that have occured in the multiplexer
@@ -185,7 +192,7 @@ func (m *Multiplexer) GetElapsedTime() time.Duration {
 }
 
 func (m *Multiplexer) createRequest() *http.Request {
-	req, _ := http.NewRequest(m.resolveMethod(), m.resolveURL(), nil)
+	req, _ := http.NewRequest(m.method, m.destinationURL, nil)
 
 	// dump the request to the console
 	dump, _ := httputil.DumpRequest(req, false)
@@ -261,18 +268,8 @@ func (m *Multiplexer) errorOccurred(err error) {
 	m.errorCh <- err
 }
 
-func (m *Multiplexer) resolveURL() string {
-	query := m.originalRequest.URL.Query()
-	m.logger.Println(query["url"][0])
-	return query["url"][0]
-}
-
-func (m *Multiplexer) resolveMethod() string {
-	return m.originalRequest.Method
-}
-
 // NewMultiplexer - create new request context
-func NewMultiplexer(originalRequest *http.Request, logger Logger, session int64) (*Multiplexer, error) {
+func NewMultiplexer(originalRequest *http.Request, method string, destinationURL string, logger Logger, session int64) (*Multiplexer, error) {
 	// it is better to initialize proxy here, so that
 	// if env variables change service does not have to get restarted
 	// proxyURL, err := url.Parse(getProxyStr())
@@ -308,5 +305,7 @@ func NewMultiplexer(originalRequest *http.Request, logger Logger, session int64)
 		concurrentTries: cuncurrentTries,
 		session:         session,
 		proxyAuth:       getProxyAuth(),
+		destinationURL:  destinationURL,
+		method:          method,
 	}, nil
 }

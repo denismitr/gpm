@@ -49,7 +49,9 @@ func TestProxyGetRequest(t *testing.T) {
 		ts := httptest.NewServer(r)
 		defer ts.Close()
 
-		_, body := testRequest(t, ts, "GET", "/get?url=https://httpbin.org/html", nil)
+		uri := "/get?url=" + uriEncode("https://httpbin.org/html")
+
+		_, body := testRequest(t, ts, "GET", uri, nil)
 		if reflect.DeepEqual(body, testBody) {
 			t.Fatalf("Expected test body, got %v", body)
 		}
