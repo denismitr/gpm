@@ -278,6 +278,8 @@ func NewMultiplexer(originalRequest *http.Request, method string, destinationURL
 	if err != nil || proxyStr == "" {
 		logger.Print(err)
 		proxyURL = nil
+	} else {
+		logger.Printf("Creating multiplexer with proxy %s", proxyStr)
 	}
 
 	// how many concurrent requests should be sent to destination URL
