@@ -3,8 +3,8 @@ The proxy works as an api receiving requests in format
 `/get?api_key=secret&url=httpsbin.org/html` and returns the response body and headers
 
 ### Dependencies
-`go get -u github.com/go-chi/chi`
-`go get -u github.com/joho/godotenv`
+* `go get -u github.com/go-chi/chi`
+* `go get -u github.com/joho/godotenv`
 
 ### Environment variables required for the proxy server to work
 * `GPM_PORT` - port on wich the microservice works (defaults to `:8081`)
