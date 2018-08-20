@@ -103,7 +103,7 @@ func (m *Multiplexer) processRequest() {
 
 			// on time out create an invalid first response and return
 			m.FirstResponse <- NewInvalidFirstResponse(
-				fmt.Errorf("all requests on session [%d] failed with timeout after waiting for %.3f seconds", m.session, m.timeout.Seconds()),
+				fmt.Errorf("all requests to %s failed with timeout after waiting for %.3f seconds", m.destinationURL, m.timeout.Seconds()),
 				true,
 				m.GetElapsedTime())
 

@@ -44,18 +44,25 @@ func TestProxyGetRequest(t *testing.T) {
 
 		r.Use(server.ProxyGetRequest)
 
-		testBody := []byte(testHTML)
-
-		r.Get("/get", testHandler(t, r, server, testBody))
+		r.Get("/get", server.ProxyGetResponse)
 
 		ts := httptest.NewServer(r)
 		defer ts.Close()
 
 		uri := "/get?url=" + uriEncode("https://httpbin.org/html")
 
-		_, body := testRequest(t, ts, "GET", uri, nil)
-		if reflect.DeepEqual(body, testBody) {
-			t.Fatalf("Expected test body, got %v", body)
+		response, body := testRequest(t, ts, "GET", uri, nil)
+
+		if len(body) != len(testHTML) {
+			t.Errorf("Expected response body to have length of %d instead got %d", len(testHTML), len(body))
+		}
+
+		if body != testHTML {
+			t.Errorf("Expected to see test body %s but got %s", testHTML, testHTML)
+		}
+
+		if response.Header.Get("Content-Type") != "text/html; charset=utf-8" {
+			t.Errorf("Expected content type of text/html; charset=utf-8 but no")
 		}
 	})
 
@@ -66,24 +73,26 @@ func TestProxyGetRequest(t *testing.T) {
 		server := NewServer(logger)
 
 		r.Use(server.ProxyGetRequest)
-
-		data, err := ioutil.ReadFile("../testdata/response_1534688291588.json")
-		if err != nil {
-			t.Fatalf("Could not read test data from response_1534688291588.json")
-		}
-
-		testBody := []byte(data)
-
-		r.Get("/get", testJSONHandler(t, r, server, testBody))
+		r.Get("/get", server.ProxyGetResponse)
 
 		ts := httptest.NewServer(r)
 		defer ts.Close()
 
 		uri := "/get?url=" + uriEncode("https://httpbin.org/json")
 
-		_, body := testRequest(t, ts, "GET", uri, nil)
-		if reflect.DeepEqual(body, testBody) {
-			t.Fatalf("Expected test body, got %v", body)
+		response, body := testRequest(t, ts, "GET", uri, nil)
+
+		// body, _ := ioutil.ReadAll(response.GetBody())
+
+		data, err := ioutil.ReadFile("../testdata/response_1534688291588.json")
+		if err != nil {
+			t.Fatalf("Could not read test data from response_1534688291588.json")
+		}
+
+		assertExactJSON(t, []byte(data), []byte(body))
+
+		if response.Header.Get("Content-Type") != "application/json" {
+			t.Fatalf("Response does not contain the application/json content type")
 		}
 	})
 
@@ -106,6 +115,29 @@ func TestProxyGetRequest(t *testing.T) {
 		if !strings.Contains(string(body), "error status 500 received from http://httpbin.org/status/500") {
 			t.Fatalf("Expected valid error string, got %v", body)
 		}
+	})
+
+	t.Run("long delay", func(t *testing.T) {
+		// Given
+		os.Setenv("GPM_MAX_TIMEOUT", "3")
+		r := chi.NewRouter()
+
+		logger := log.New(os.Stdout, "", log.LstdFlags)
+		server := NewServer(logger)
+
+		r.Use(server.ProxyGetRequest)
+
+		r.Get("/get", server.ProxyGetResponse)
+
+		ts := httptest.NewServer(r)
+		defer ts.Close()
+
+		_, body := testRequest(t, ts, "GET", "/get?url=https://httpbin.org/delay/5", nil)
+
+		if !strings.Contains(body, "all requests to http://httpbin.org/delay/5 failed with timeout after waiting for 3.000 seconds") {
+			t.Fatalf("Expected valid error string, got %v", body)
+		}
+		os.Setenv("GPM_MAX_TIMEOUT", "10")
 	})
 
 	t.Run("invalid url argument", func(t *testing.T) {
