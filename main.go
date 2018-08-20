@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/denismitr/gpm/proxy"
+	"github.com/joho/godotenv"
 
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
@@ -17,6 +19,15 @@ import (
 const defaultPort = ":8081"
 
 func main() {
+	err := godotenv.Load()
+	if err != nil {
+		fmt.Println("Error loading .env file. Trying hard coded path")
+		err = godotenv.Load("/root/.env")
+		if err != nil {
+			panic("No success. Error loading .env file")
+		}
+	}
+
 	// get max timeout from env
 	timeout := getMaxTimeout()
 	logger := log.New(os.Stdout, "", log.LstdFlags)
