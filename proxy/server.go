@@ -16,6 +16,9 @@ type Server struct {
 	// logger that implemets proxy.Logger interface
 	logger Logger
 
+	// list of available proxy servers
+	proxyList *List
+
 	// stores unique session number
 	session int64
 
@@ -56,7 +59,12 @@ func (s *Server) ProxyGetRequest(next http.Handler) http.Handler {
 
 		// create new context
 		requestContext, err := NewMultiplexer(
-			r, http.MethodGet, destinationURL, s.logger, atomic.AddInt64(&s.session, 1))
+			r, http.MethodGet,
+			destinationURL,
+			s.logger,
+			s.proxyList,
+			atomic.AddInt64(&s.session, 1),
+		)
 
 		if err != nil {
 			s.logger.Println(err)
@@ -148,12 +156,13 @@ func (s *Server) proxyResponse(w http.ResponseWriter, response *FirstResponse) {
 }
 
 // NewServer - creates a new proxy server
-func NewServer(logger Logger) *Server {
+func NewServer(logger Logger, list *List) *Server {
 	apiKey := os.Getenv("GPM_SERVER_API_KEY")
 
 	server := Server{
-		logger: logger,
-		apiKey: apiKey,
+		logger:    logger,
+		apiKey:    apiKey,
+		proxyList: list,
 	}
 
 	return &server

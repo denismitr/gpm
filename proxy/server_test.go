@@ -36,11 +36,14 @@ func TestProxyGetRequest(t *testing.T) {
 
 	os.Setenv("GPM_SERVER_API_KEY", "secret")
 
+	list := NewList()
+	list.Load()
+
 	t.Run("html 200 response", func(t *testing.T) {
 		r := chi.NewRouter()
 
 		logger := log.New(os.Stdout, "", log.LstdFlags)
-		server := NewServer(logger)
+		server := NewServer(logger, list)
 
 		r.Use(server.ProxyGetRequest)
 
@@ -70,7 +73,7 @@ func TestProxyGetRequest(t *testing.T) {
 		r := chi.NewRouter()
 
 		logger := log.New(os.Stdout, "", log.LstdFlags)
-		server := NewServer(logger)
+		server := NewServer(logger, list)
 
 		r.Use(server.ProxyGetRequest)
 		r.Get("/get", server.ProxyGetResponse)
@@ -101,7 +104,7 @@ func TestProxyGetRequest(t *testing.T) {
 		r := chi.NewRouter()
 
 		logger := log.New(os.Stdout, "", log.LstdFlags)
-		server := NewServer(logger)
+		server := NewServer(logger, list)
 
 		r.Use(server.ProxyGetRequest)
 
@@ -123,7 +126,7 @@ func TestProxyGetRequest(t *testing.T) {
 		r := chi.NewRouter()
 
 		logger := log.New(os.Stdout, "", log.LstdFlags)
-		server := NewServer(logger)
+		server := NewServer(logger, list)
 
 		r.Use(server.ProxyGetRequest)
 
@@ -145,7 +148,7 @@ func TestProxyGetRequest(t *testing.T) {
 		r := chi.NewRouter()
 
 		logger := log.New(os.Stdout, "", log.LstdFlags)
-		server := NewServer(logger)
+		server := NewServer(logger, list)
 
 		r.Use(server.ProxyGetRequest)
 		r.Get("/get", func(w http.ResponseWriter, r *http.Request) {
@@ -168,11 +171,14 @@ func TestProxyGetRequest(t *testing.T) {
 func TestCheckAPIKey(t *testing.T) {
 	os.Setenv("GPM_SERVER_API_KEY", "secret")
 
+	list := NewList()
+	list.Load()
+
 	t.Run("correct api key", func(t *testing.T) {
 		r := chi.NewRouter()
 
 		logger := log.New(os.Stdout, "", log.LstdFlags)
-		server := NewServer(logger)
+		server := NewServer(logger, list)
 
 		r.Use(server.CheckAPIKey)
 
@@ -192,7 +198,7 @@ func TestCheckAPIKey(t *testing.T) {
 		r := chi.NewRouter()
 
 		logger := log.New(os.Stdout, "", log.LstdFlags)
-		server := NewServer(logger)
+		server := NewServer(logger, list)
 
 		r.Use(server.CheckAPIKey)
 
@@ -214,7 +220,7 @@ func TestCheckAPIKey(t *testing.T) {
 		r := chi.NewRouter()
 
 		logger := log.New(os.Stdout, "", log.LstdFlags)
-		server := NewServer(logger)
+		server := NewServer(logger, list)
 
 		r.Use(server.CheckAPIKey)
 
@@ -236,7 +242,7 @@ func TestCheckAPIKey(t *testing.T) {
 		r := chi.NewRouter()
 
 		logger := log.New(os.Stdout, "", log.LstdFlags)
-		server := NewServer(logger)
+		server := NewServer(logger, list)
 
 		r.Use(server.CheckAPIKey)
 
@@ -260,7 +266,7 @@ func TestCheckAPIKey(t *testing.T) {
 		r := chi.NewRouter()
 
 		logger := log.New(os.Stdout, "", log.LstdFlags)
-		server := NewServer(logger)
+		server := NewServer(logger, list)
 
 		r.Use(server.CheckAPIKey)
 

@@ -2,15 +2,15 @@ package proxy
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"net/http"
 	"net/http/httputil"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
 )
+
+const firstRequest = 1
 
 // Multiplexer - orchestrates making HTTP requests to the requested URL
 type Multiplexer struct {
@@ -35,14 +35,10 @@ type Multiplexer struct {
 	// ticker to detect a time out
 	timeoutCh <-chan time.Time
 
-	// HTTP client
-	client *http.Client
-	// Transport with TSL configuration and proxy settings
-	transport *http.Transport
-	// proxy auth string can be included into headers or prepended to the proxy url
-	proxyAuth string
 	// logger
 	logger Logger
+	// proxy list
+	proxyList *List
 	// max timeout
 	timeout time.Duration
 	// number of concurrent request that multiplexer method should produce
@@ -95,7 +91,7 @@ func (m *Multiplexer) processRequest() {
 
 			if m.AllErrored() {
 				m.finish()
-				m.FirstResponse <- NewInvalidFirstResponse(m.GetAvgError(), false, m.GetElapsedTime())
+				m.FirstResponse <- NewInvalidFirstResponse(m.GetFirstError(), false, m.GetElapsedTime())
 				return
 			}
 		case <-m.timeoutCh:
@@ -143,20 +139,21 @@ func (m *Multiplexer) AllErrored() bool {
 	return m.GetErrorsCount() >= m.concurrentTries
 }
 
-// GetAvgError get an error that was mostly or excludively encountered during requests
+// GetFirstError get an error that was mostly or excludively encountered during requests
 // otherwise just return that all requests failed
-func (m *Multiplexer) GetAvgError() error {
-	if m.AllErrored() {
-		for _, err := range m.errors {
-			for _, anotherErr := range m.errors {
-				if err.Error() != anotherErr.Error() {
-					return fmt.Errorf("all requests to %s have failed", m.destinationURL)
-				}
-			}
-		}
+func (m *Multiplexer) GetFirstError() error {
+	return m.errors[0]
+	// if m.AllErrored() {
+	// 	for _, err := range m.errors {
+	// 		for _, anotherErr := range m.errors {
+	// 			if err.Error() != anotherErr.Error() {
+	// 				return fmt.Errorf("all requests to %s have failed", m.destinationURL)
+	// 			}
+	// 		}
+	// 	}
 
-		return m.errors[0]
-	}
+	// 	return m.errors[0]
+	// }
 
 	return fmt.Errorf("all requests to %s have failed", m.destinationURL)
 }
@@ -211,6 +208,20 @@ func (m *Multiplexer) multiplex(index int) {
 		}
 	}()
 
+	var transport *http.Transport
+	var err error
+
+	if index == firstRequest {
+		transport = NewTransport()
+	} else {
+		transport, err = NewProxiedTransport(m.proxyList.Rand())
+		if err != nil {
+			m.logger.Printf("Could not create proxied transport, falls back to default one")
+		}
+	}
+
+	// create a new client
+	client := NewClient(transport)
 	// create a new request
 	req := m.createRequest()
 
@@ -222,7 +233,7 @@ func (m *Multiplexer) multiplex(index int) {
 		}()
 
 		// make a query
-		response, err := m.client.Do(req)
+		response, err := client.Do(req)
 		if err != nil {
 			// we don't want to register an error when context has timed out
 			// for any timout error there is a specialized handler
@@ -255,11 +266,11 @@ func (m *Multiplexer) multiplex(index int) {
 	select {
 	case <-m.doneCh:
 		m.logger.Printf("\nMultiplexer on session [%d] is done. Cancelling remaining requests", m.session)
-		m.transport.CancelRequest(req)
+		transport.CancelRequest(req)
 		return
 	case <-m.context.Done():
 		m.logger.Printf("\nContext on session [%d] was cancelled. Cancelling remaining requests", m.session)
-		m.transport.CancelRequest(req)
+		transport.CancelRequest(req)
 		return
 	}
 }
@@ -270,28 +281,17 @@ func (m *Multiplexer) errorOccurred(err error) {
 }
 
 // NewMultiplexer - create new request context
-func NewMultiplexer(originalRequest *http.Request, method string, destinationURL string, logger Logger, session int64) (*Multiplexer, error) {
+func NewMultiplexer(
+	originalRequest *http.Request,
+	method string,
+	destinationURL string,
+	logger Logger,
+	proxyList *List,
+	session int64,
+) (*Multiplexer, error) {
 	// how many concurrent requests should be sent to destination URL
 	cuncurrentTries := getConcurrentTries()
 	timeout := time.Duration(GetMaxTimeout()) * time.Second
-
-	// it is better to initialize proxy here, so that
-	// if env variables change service does not have to get restarted
-	proxyStr := getProxyStr()
-	proxyURL, err := url.Parse(proxyStr)
-	if err != nil || proxyStr == "" {
-		logger.Print(err)
-		proxyURL = nil
-	} else {
-		logger.Printf("Creating multiplexer with proxy %s and %d concurrent tries", proxyStr, cuncurrentTries)
-	}
-
-	//create and prepare the transport
-	tlsClientSkipVerify := &tls.Config{InsecureSkipVerify: true}
-	transport := &http.Transport{TLSClientConfig: tlsClientSkipVerify}
-	if proxyURL != nil {
-		transport.Proxy = http.ProxyURL(proxyURL)
-	}
 
 	// get context from the original request
 	ctx, cancel := context.WithCancel(originalRequest.Context())
@@ -308,12 +308,10 @@ func NewMultiplexer(originalRequest *http.Request, method string, destinationURL
 		logger:          logger,
 		timeoutCh:       time.Tick(timeout + time.Second),
 		timeout:         timeout,
-		transport:       transport,
-		client:          NewClient(transport),
 		concurrentTries: cuncurrentTries,
 		session:         session,
-		proxyAuth:       getProxyAuth(),
 		destinationURL:  destinationURL,
 		method:          method,
+		proxyList:       proxyList,
 	}, nil
 }

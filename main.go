@@ -28,10 +28,13 @@ func main() {
 		}
 	}
 
+	list := proxy.NewList()
+	list.Load()
+
 	// get max timeout from env
 	timeout := getMaxTimeout()
 	logger := log.New(os.Stdout, "", log.LstdFlags)
-	server := proxy.NewServer(logger)
+	server := proxy.NewServer(logger, list)
 
 	// initialize new router
 	r := chi.NewRouter()
