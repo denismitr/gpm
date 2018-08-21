@@ -9,19 +9,20 @@ The proxy works as an api receiving requests in format
 ### Environment variables required for the proxy server to work
 * `GPM_PORT` - port on wich the microservice works (defaults to `:8081`)
 * `GPM_SERVER_API_KEY` - security api key
-* `GPM_PROXY_URL` - third party proxy service url
-* `GPM_PROXY_AUTH` -  third party proxy service auth token
+* `GPM_PROXY_LIST` - file that contains the list of proxy servers, can be a relative 
+or an absolute path. Defaults to "proxy.list"
 * `GPM_CONCURRENT_TRIES` - how many concurrent request through proxy service is going to be made concurrently (defaults to 3)
 * `GPM_MAX_TIMEOUT` - maximum timeout after which an error response ig going to be send (defaults to 10 seconds)
 
 ### Usage (this functionality is temporarily disabled)
 To make api_key mandatory just set `GPM_SERVER_API_KEY` to some value e.g. `export GPM_SERVER_API_KEY=secret`
-To use proxy service set `GPM_PROXY_URL` and `GPM_PROXY_AUTH` if it's not a free service.
+
+To use proxy service fill a specified in  `GPM_PROXY_LIST` file with proxies you want to use.
 
 Example:
 ```
-export GPM_PROXY_URL="proxy.crawlera.com:8010"
-export GPM_PROXY_AUTH="your-secret-key"
+127.0.0.1:8089
+127.0.0.1:8088
 ```
 
 
